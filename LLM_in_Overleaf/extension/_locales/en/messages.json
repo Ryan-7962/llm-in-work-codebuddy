@@ -1,0 +1,11 @@
+{
+  "extDescription": {
+    "message": "Bring local CodeBuddy (WorkBuddy) or Codex into Overleaf: edit selected LaTeX, review changes, apply with control, and ask in place."
+  },
+  "actionTitle": {
+    "message": "LLM_in_Overleaf writing assistant"
+  },
+  "cmdToggle": {
+    "message": "Open or close the LLM_in_Overleaf panel"
+  }
+}

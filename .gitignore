@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+package-lock.json.bak
+
+# 运行时产物与日志
+*.log
+*.zip
+app.backup.*/
+cert/
+runtime.json
+run.sh
+
+# 本机密钥（永不入库）
+.codebuddy/
+*.key
+*.pem
+*.pfx
+pfx-password.txt

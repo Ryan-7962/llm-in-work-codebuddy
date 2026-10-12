@@ -1,0 +1,8 @@
+{
+  "actionTitle": {
+    "message": "LLM_in_PDF · Read papers and ask about selections"
+  },
+  "extDescription": {
+    "message": "Read local PDFs and arXiv papers in Chrome with local Claude Code or Codex. Select passages or figures for interactive Q&A."
+  }
+}

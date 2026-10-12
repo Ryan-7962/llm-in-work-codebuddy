@@ -1,0 +1,82 @@
+# 更新记录
+
+## Unreleased
+
+- Find the Codex CLI that newer Codex and ChatGPT desktop apps ship in `Contents/Resources/codex-cli/bin`, so Codex works without a separate install.
+
+中文摘要：能找到新版 Codex / ChatGPT 桌面应用自带的 Codex CLI，不单独安装也能用 Codex。
+
+## 0.9.0 — 2026-09-30
+
+- Add an English interface. Switch **English / 中文** in the panel's Settings or in the toolbar popup; the choice is remembered and shared. Existing conversations are not translated. Chrome's extension page shows the English or Chinese description automatically.
+- Explanations follow the language of your instruction (falling back to the interface language). Replacements keep the document's language unless you ask for a translation.
+- Safer Claude calls, matching LLM_in_Word: permission checks are no longer skipped and your own MCP servers are not loaded. Text-only turns run without tools; turns with attachments may only use Read on those files. Codex runs read-only with approvals disabled.
+- More robust native host: a request timeout (10 minutes; `LLM_IN_OVERLEAF_TIMEOUT_MS`), process-tree cleanup when you stop, error categories with a suggested fix, and failed turns no longer resume a broken CLI session.
+- Markdown tables in answers are rendered as tables instead of raw `|` text.
+- Refreshing the model list reads the CLI's model catalog without sending a prompt. Claude shows resolved versions (for example Sonnet 5.5); Codex offers only the reasoning efforts each model supports.
+- New installers: `install.ps1` for Windows and Linux support in `install.sh`, both with an uninstall option. The installer now checks that the host starts and reports whether Claude Code and Codex are ready, and it no longer records temporary PATH entries.
+- CI runs on Linux, macOS and Windows, including an installer smoke test and English-interface browser regressions.
+
+To update, rerun the installer, click **Reload** on the extension card, then refresh Overleaf.
+
+中文摘要：新增英文界面与中英切换；模型说明文字跟随指令语言；Claude 调用不再跳过权限、不加载本机 MCP；增加超时、进程树清理和出错建议；模型列表刷新不再发生成请求；回答里的 Markdown 表格正常显示；新增 Windows / Linux 安装与卸载；CI 覆盖三大系统。更新后重跑安装脚本、在扩展页点「重新加载」并刷新 Overleaf。
+
+## 0.8.2 — 2026-09-26
+
+- Standardize LLM_in_Overleaf naming across the native host, runtime directory, configuration and page bridge.
+- Add selection, diff preview and applied-edit screenshots with a reproducible browser demo.
+- Simplify the English and Chinese guides around installation and usage.
+
+## 0.8.1 — 2026-09-26
+
+- Rename the project and extension to LLM_in_Overleaf within LLM_in_Work.
+- Add English and Chinese guides, portable installation instructions and offline CI.
+- Keep the extension ID stable.
+- Make npm test run offline regressions; live calls use npm run test:live.
+
+## v0.8.0：多个不连续选段
+
+- 在同一 `.tex` 文件中，选一段后点「＋ 添加选段」，再选另一处并重复添加；已有选段会保留。浮标在已有目标时显示「＋ 加入选段」。若编辑器已经有多个不连续选区，也能一次捕获全部非空选区。
+- 顶部仅显示文件名和「N 段」，保持紧凑布局。点击摘要或「设置」可逐段定位、移除，也可清空整组。重复添加同一位置会去重；部分重叠的选段会提示先移除重叠项。
+- 问答模式可对比多段；改写模式逐段展示差异，点「应用全部选段」一次写回。中间未选中的文字保持不变，整组修改可一次撤销。
+- 每段独立校验原文和文件名，任一段失效时整组都不写入。模型漏掉某段或返回无法对应的替换稿时，不提供应用按钮。
+- 目前一组选段属于同一文件。切换文件前请先应用或清空已有选段。
+
+更新后重新加载扩展并刷新 Overleaf；已有本机桥无需重装。
+
+## v0.7.3：扩大输出区域
+
+- 默认使用紧凑布局：顶部仅保留工具栏和一行模式 / 选区摘要。点击「设置」或选区摘要，可打开模型、思考强度、模式和选区详情；设置以浮层显示，不挤压回复高度。
+- 点击顶部「阅读」最大化输出区域，暂时收起选区栏、附件、快捷指令和输入框；点击「返回」或按 Esc 恢复输入，草稿保留。生成过程中仍可在顶部点击「停止」。
+- 缩小输入区和附件工具的留白，普通操作提示不再固定占位；连接异常和选区读取错误仍会显示。
+- 输出区独立滚动，阅读模式中的替换预览不再受内部 320px 高度限制。
+
+更新后在扩展管理页点「重新加载」，再刷新 Overleaf 项目页。
+
+## v0.7.2：支持 Overleaf 中文站
+
+- 增加 `cn.overleaf.com` 的自动注入、弹窗打开和快捷键支持，修复已经在项目页却提示「请先切到一个 Overleaf 项目编辑页」的问题。
+- 主站和中文站使用相同的操作方式。更新后在扩展管理页点「重新加载」，再刷新当前 Overleaf 项目页，无需切换域名。
+
+## v0.7.1：修复「选中文字却无法开启」
+
+- 浮标直接读取 CodeMirror 的选区和坐标，不再要求 `window.getSelection()` 同时存在；支持拖选、双击、键盘选择和单个字符。
+- 页面右下角显示明确的「✦ 写作助手」入口；扩展图标弹窗新增「打开写作助手」，面板新增「使用当前选区」。打开时会先读取选区，再聚焦输入框。
+- 扩展刚安装时，弹窗和快捷键会尝试为已打开的项目页补注入脚本；注入失败会显示刷新提示。兼容带 `www` 和不带 `www` 的 Overleaf 项目地址。
+- 避开隐藏的旧编辑器，优先读取当前聚焦的编辑器；选区位置、文件名和原文一次读取。未找到源码编辑器时明确提示打开 `.tex` 和切换 Code Editor。
+- 增加真实 CodeMirror 浏览器回归：测试可见按钮的实际点击，以及各个备用开启入口。
+
+**已有安装更新：**在 Chrome 扩展管理页找到本扩展，点「重新加载」，再刷新 Overleaf 项目页。然后可以直接点击工具栏扩展图标 →「打开写作助手」。本次修改不需要重新安装本机桥。
+
+## v0.7 更新
+
+- 更简洁的写作侧栏、欢迎引导、输入区域和设置弹窗；改善段落间距、键盘焦点和窄屏布局。
+- 中文输入法选词回车不再误发送；无选区或读取失败时保留草稿；读取上下文期间防重复发送。
+- 向上阅读历史时不再自动滚到底部；修复最终差异卡片被流式渲染覆盖，以及推挤布局反复触发 resize 的问题。
+- 失败、停止后的不完整回复不能一键应用；旧预览不能应用到新选区。
+- Codex 自动查找 PATH、常见安装目录和 macOS 的 Codex/ChatGPT 应用内 CLI；跳过失效符号链接。可用 `LLM_IN_OVERLEAF_CODEX_BIN` 显式指定路径。
+- 健康检查区分桥启动与所选 CLI 可用性，并检查 Codex 登录状态。默认模型跟随本机 Codex 配置；获取模型列表只探测当前后端，支持分页。
+- 续写仅在会话丢失时重新建立，登录/网络失败直接显示具体错误；支持取消、空输出和进程异常处理。
+- 安装脚本保存 PATH、CLI 路径覆盖和 CODEX_HOME，安全转义变量，不再输出代理凭据。
+
+更新已有安装后，在 Chrome 扩展管理页重新加载扩展，再刷新 Overleaf 页面。已有本机桥仍指向同一项目路径时无需重装；需要更新代理或自定义 CLI 路径时再运行 `./install.sh`。
