@@ -49,41 +49,57 @@ function readKey() {
 export const EST_CREDIT_PER_IMAGE = 5.7;
 
 // ---------- 文生图 ----------
-export async function generateImage({ prompt, size } = {}) {
+// 注：上游 /v2/images/generations 会忽略 n 参数（实测 n=2 仍返回 1 张），
+// 多候选由本函数并发 count 次实现。
+export async function generateImage({ prompt, size, count } = {}) {
   if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('请填写画面描述');
   if (prompt.length > MAX_PROMPT) throw new Error(`画面描述过长（上限 ${MAX_PROMPT} 字）`);
   const sz = SIZES.has(size) ? size : '1024x1024';
+  const n = Math.min(Math.max(Number.parseInt(count, 10) || 1, 1), 4); // 候选 1–4 张
   const key = readKey();
 
-  let resp;
-  try {
-    resp = await fetch(GEN_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: GEN_MODEL, prompt: prompt.trim(), size: sz, n: 1 }),
-      signal: AbortSignal.timeout(GEN_TIMEOUT_MS),
-    });
-  } catch (e) {
-    throw new Error(`生图服务连接失败：${e?.message || e}`);
+  async function genOnce() {
+    let resp;
+    try {
+      resp = await fetch(GEN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: GEN_MODEL, prompt: prompt.trim(), size: sz, n: 1 }),
+        signal: AbortSignal.timeout(GEN_TIMEOUT_MS),
+      });
+    } catch (e) {
+      throw new Error(`生图服务连接失败：${e?.message || e}`);
+    }
+    if (!resp.ok) throw new Error(`生图服务 HTTP ${resp.status}`);
+    let data;
+    try { data = await resp.json(); } catch { throw new Error('生图服务返回了无法解析的内容'); }
+    if (data.code !== 0) throw new Error(`生图失败：${data.msg || '未知错误'}（code ${data.code}）`);
+    const items = Array.isArray(data?.data?.data) ? data.data.data : [];
+    const images = [];
+    for (const it of items) {
+      if (it && typeof it.b64_json === 'string' && it.b64_json) {
+        images.push({ b64: it.b64_json, mime: 'image/png' });
+        continue;
+      }
+      if (it && typeof it.url === 'string' && /^https:\/\//.test(it.url)) {
+        images.push(await downloadAsImage(it.url));
+      }
+    }
+    if (!images.length) throw new Error('生图服务未返回图片');
+    return { images, usage: data.usage || {} };
   }
-  if (!resp.ok) throw new Error(`生图服务 HTTP ${resp.status}`);
-  let data;
-  try { data = await resp.json(); } catch { throw new Error('生图服务返回了无法解析的内容'); }
-  if (data.code !== 0) throw new Error(`生图失败：${data.msg || '未知错误'}（code ${data.code}）`);
 
-  const items = Array.isArray(data?.data?.data) ? data.data.data : [];
-  const images = [];
-  for (const it of items) {
-    if (it && typeof it.b64_json === 'string' && it.b64_json) {
-      images.push({ b64: it.b64_json, mime: 'image/png' });
-      continue;
-    }
-    if (it && typeof it.url === 'string' && /^https:\/\//.test(it.url)) {
-      images.push(await downloadAsImage(it.url));
-    }
+  if (n === 1) return genOnce();
+
+  const settled = await Promise.allSettled(Array.from({ length: n }, () => genOnce()));
+  const ok = settled.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+  if (!ok.length) {
+    const firstErr = settled[0].reason;
+    throw firstErr instanceof Error ? firstErr : new Error(String(firstErr || '生成失败'));
   }
-  if (!images.length) throw new Error('生图服务未返回图片');
-  return { images, usage: data.usage || {} };
+  const images = ok.flatMap((r) => r.images);
+  const credit = ok.reduce((s, r) => s + (Number(r.usage?.credit) || 0), 0);
+  return { images, usage: credit ? { credit } : {} };
 }
 
 // ---------- 抠图（去背景，透明 PNG） ----------
@@ -148,18 +164,21 @@ export async function matting({ imageB64 } = {}) {
   return { images, usage: result?.data?.usage || {} };
 }
 
-// ---------- 上下文配图：选中文本 → 英文生图 prompt ----------
+// ---------- 上下文配图：选中文本 → 中文画面描述（丰满、六要素，可修改） ----------
+// 注：hunyuan-image-alpha 原生支持中文提示词（2026-10-13 实测），无需翻译层。
 export function enhancePrompt({ context, instruction } = {}) {
   const ctx = typeof context === 'string' ? context.trim() : '';
   if (!ctx) throw new Error('请先在文档里选中一段内容，或直接在输入框填写画面描述');
-  const extra = typeof instruction === 'string' && instruction.trim() ? `\n用户补充要求：${instruction.trim()}` : '';
+  const extra = typeof instruction === 'string' && instruction.trim() ? `\n用户指定的风格或补充要求：${instruction.trim()}` : '';
   const sysPrompt = [
-    '你是 AI 文生图提示词工程师。根据下面的文档内容，写一条适合文生图模型的英文提示词（prompt），为这段内容配一张贴合主题的插图。',
+    '你是 AI 文生图文案专家。根据下面的文档内容，写一段丰满、直接可用的中文画面描述，为这段内容配一张贴合主题的商务演示插图。',
     '要求：',
-    '1. 只输出英文提示词本身，不要任何解释、前缀或引号；',
-    '2. 提示词包含：画面主体、风格（如 flat illustration / minimalist / isometric 等，选贴合商务演示场景的）、色调、背景；',
-    '3. 长度控制在 60 词以内；',
-    '4. 如果内容是数据/结论类，配意象化的概念插图而不是图表。',
+    '1. 只输出中文画面描述本身，不要任何解释、前缀、小标题或引号；',
+    '2. 描述必须自然覆盖六个要素：画面主体、场景环境、插画风格、色彩色调、整体氛围、构图方式；',
+    '3. 全文 120–200 字，连贯成段（不要分条罗列）；',
+    '4. 用具体可感的视觉语言（颜色、材质、光线、线条感、留白），避免「高质量」「大师级」「超高清」这类空洞词；',
+    '5. 如果内容是数据/结论类，配意象化的概念插图而不是图表；',
+    '6. 默认干净、专业、适合放进商务演示文稿的画风，除非用户另有指定。',
     '',
     '文档内容：',
     ctx.slice(0, 3000),

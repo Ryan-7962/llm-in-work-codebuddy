@@ -231,7 +231,7 @@ async function handleImage(req, res) {
     return;
   }
   try {
-    const r = await generateImage({ prompt: payload?.prompt, size: payload?.size });
+    const r = await generateImage({ prompt: payload?.prompt, size: payload?.size, count: payload?.count });
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, images: r.images, usage: r.usage }));
   } catch (e) {
