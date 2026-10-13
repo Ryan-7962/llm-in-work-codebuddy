@@ -17,11 +17,13 @@
   function injectStyle() {
     const style = document.createElement('style');
     style.textContent = [
-      '.llm-nav { display:flex; flex:none; background:#fff; border-bottom:1px solid var(--line, #e3e6ea); padding:0 8px; gap:2px; }',
-      '.llm-nav-btn { flex:1; border:0; background:transparent; cursor:pointer; padding:8px 4px 7px; font:inherit; font-size:12.5px; color:var(--muted, #6b7686); border-bottom:2px solid transparent; display:flex; align-items:center; justify-content:center; gap:4px; white-space:nowrap; }',
-      '.llm-nav-btn svg { flex:none; }',
-      '.llm-nav-btn:hover { color:var(--accent, #2563eb); }',
-      '.llm-nav-btn.on { color:var(--accent, #2563eb); font-weight:600; border-bottom-color:var(--accent, #2563eb); }',
+      '.llm-nav { display:flex; flex:none; background:var(--paper, #f7f8fa); border-bottom:1px solid var(--line, #e3e6ea); padding:7px 9px; gap:4px; }',
+      '.llm-nav-btn { flex:1; min-width:0; border:0; background:transparent; cursor:pointer; padding:7px 2px; font:inherit; font-size:12.5px; line-height:1.4; color:var(--muted, #6b7686); border-radius:9px; display:flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap; transition:background .12s, color .12s; }',
+      '.llm-nav-btn svg { flex:none; opacity:.9; }',
+      '.llm-nav-btn:hover { color:var(--accent, #2563eb); background:rgba(0,0,0,.05); }',
+      '.llm-nav-btn.on { color:var(--accent, #2563eb); font-weight:600; background:rgba(0,0,0,.06); background:color-mix(in srgb, var(--accent, #2563eb) 13%, transparent); }',
+      '.llm-nav-btn.on svg { opacity:1; }',
+      'body.llm-nav-ready #mode-summary { display:none !important; }',
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -70,6 +72,7 @@
       btns[t.key] = b;
     }
     hdr.insertAdjacentElement('afterend', nav);
+    document.body.classList.add('llm-nav-ready'); // 启用隐藏 context-bar 里冗余的模式按钮（导航已表达当前模式）
 
     let lastModeKey = 'edit'; // 回退目标：图像 → 上一个对话模式
     let imageView = false;
