@@ -30,7 +30,7 @@
     </Sets>
   </Requirements>
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://localhost:8387/taskpane.html"/>
+    <SourceLocation DefaultValue="https://localhost:8387/taskpane.html?v=20261014"/>
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
@@ -75,7 +75,7 @@
         <bt:Image id="LLMInPowerPoint.Icon80" DefaultValue="https://localhost:8387/assets/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="LLMInPowerPoint.TaskpaneUrl" DefaultValue="https://localhost:8387/taskpane.html"/>
+        <bt:Url id="LLMInPowerPoint.TaskpaneUrl" DefaultValue="https://localhost:8387/taskpane.html?v=20261014"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="LLMInPowerPoint.GroupLabel" DefaultValue="LLM_in_PowerPoint"/>

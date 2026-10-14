@@ -30,7 +30,7 @@
     </Sets>
   </Requirements>
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://localhost:8397/taskpane.html"/>
+    <SourceLocation DefaultValue="https://localhost:8397/taskpane.html?v=20261014"/>
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
@@ -75,7 +75,7 @@
         <bt:Image id="LLMInExcel.Icon80" DefaultValue="https://localhost:8397/assets/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="LLMInExcel.TaskpaneUrl" DefaultValue="https://localhost:8397/taskpane.html"/>
+        <bt:Url id="LLMInExcel.TaskpaneUrl" DefaultValue="https://localhost:8397/taskpane.html?v=20261014"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="LLMInExcel.GroupLabel" DefaultValue="LLM_in_Excel"/>
