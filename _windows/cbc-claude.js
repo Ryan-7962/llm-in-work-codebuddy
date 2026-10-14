@@ -92,6 +92,8 @@ else {
   process.stderr.write('cbc-claude: 缺少 ~/.codebuddy/api.key，请先写入 CodeBuddy API key。\n');
   process.exit(1);
 }
+// WorkBuddy 5.8.2+ dist/ 只带 codebuddy-lite-wb.mjs，必须强制启用，否则 MODULE_NOT_FOUND。
+env.CODEBUDDY_FORCE_LITE_WB_BUNDLE = '1';
 
 const CB_BIN = findCli();
 const isFallback = CB_BIN === 'codebuddy' || CB_BIN === 'codebuddy.exe';
