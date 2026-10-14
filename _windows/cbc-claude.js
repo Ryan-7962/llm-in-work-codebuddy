@@ -92,14 +92,24 @@ else {
   process.stderr.write('cbc-claude: 缺少 ~/.codebuddy/api.key，请先写入 CodeBuddy API key。\n');
   process.exit(1);
 }
-// WorkBuddy 5.8.2+ dist/ 只带 codebuddy-lite-wb.mjs，必须强制启用，否则 MODULE_NOT_FOUND。
-env.CODEBUDDY_FORCE_LITE_WB_BUNDLE = '1';
+// WorkBuddy 5.8.2+ dist/ 可能只带 codebuddy-lite-wb.mjs（标准 dist/codebuddy 被移除），
+// 需 CODEBUDDY_FORCE_LITE_WB_BUNDLE=1 才能加载。自动探测：标准 bundle 不在而 lite-wb 在
+// 时才设置——WorkBuddy 未来两个方向的 bundle 调整都能自愈。
 
 const CB_BIN = findCli();
 const isFallback = CB_BIN === 'codebuddy' || CB_BIN === 'codebuddy.exe';
 if (!isFallback && !fs.existsSync(CB_BIN)) {
   process.stderr.write(`cbc-claude: 未找到 CodeBuddy CLI（${CB_BIN}）。请确认 WorkBuddy 已安装，或设置 CODEBUDDY_BIN 环境变量。\n`);
   process.exit(1);
+}
+if (!isFallback) {
+  try {
+    const cliRoot = path.dirname(path.dirname(fs.realpathSync(CB_BIN)));
+    const hasStdBundle = ['codebuddy.js', 'codebuddy.cjs', 'codebuddy.mjs', 'codebuddy-headless.js', 'codebuddy-headless.cjs']
+      .some((f) => fs.existsSync(path.join(cliRoot, 'dist', f)));
+    const hasLiteWb = fs.existsSync(path.join(cliRoot, 'dist', 'codebuddy-lite-wb.mjs'));
+    if (!hasStdBundle && hasLiteWb) env.CODEBUDDY_FORCE_LITE_WB_BUNDLE = '1';
+  } catch { /* 探测失败不阻断，按原样启动 */ }
 }
 
 const child = spawn(CB_BIN, args, { env, stdio: 'inherit', shell: false, windowsHide: true });

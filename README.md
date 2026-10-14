@@ -99,6 +99,7 @@ _windows/             跨平台适配层 + Windows 环境准备
 - **抠图（Word/Excel）**：复制图片 → 「图像」→ 抠图页 ⌘V 粘贴（或「从剪贴板读取」）→「开始抠图」→ 插入
 - **模型**：面板右上角「设置」→ 后端 CodeBuddy (WorkBuddy) → glm-5.3 / glm-5.3-flash 等
 - **更新**：`git pull` 后重跑对应套件 install.sh / install.ps1（幂等，自动备份旧版）；已装用户改了前端文件时重启 Office 即可
+- **遇到故障**：查 **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**（排障手册：症状速查表 + WorkBuddy 自动更新导致 CLI 断联的修复手册）。**WorkBuddy 桌面版自动更新后若聊天报错，先看这份文档**
 
 ## 安全说明
 
