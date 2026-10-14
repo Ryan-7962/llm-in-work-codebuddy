@@ -66,7 +66,8 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.json': 'application/json; charset=utf-8',
 };
-function serveStatic(res, urlPath) {
+function serveStatic(req, res, urlPath) {
+  console.error(`[req] ${new Date().toISOString()} ${req.method} ${req.url}`);
   // 只允许 taskpane/ 和 assets/ 两个目录，防路径穿越
   const clean = path.normalize(urlPath).replace(/^([/\\]|\.\.)+/, '');
   let file = null;
@@ -314,7 +315,7 @@ async function handler(req, res) {
     } else if (p === '/api/image/matting' && req.method === 'POST') {
       await handleImageMatting(req, res);
     } else if (req.method === 'GET') {
-      serveStatic(res, p.slice(1));
+      serveStatic(req, res, p.slice(1));
     } else {
       res.writeHead(405); res.end();
     }

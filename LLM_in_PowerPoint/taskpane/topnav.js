@@ -45,6 +45,7 @@
   }
 
   function init() {
+    injectStyle();
     const hdr = document.querySelector('.hdr');
     if (!hdr || !hdr.parentElement) return;
 
