@@ -66,6 +66,15 @@ ls /Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/dist/
 4. 同事：`git pull` → 重跑 `install-codebuddy.ps1`（或 macOS 三行命令里的 wrapper 拷贝步骤）
 5. 把新案例补进本手册
 
+## CLI 的两种来源（wrapper 自动识别）
+
+| 来源 | 平台 | 认证方式 | 说明 |
+|---|---|---|---|
+| WorkBuddy 内嵌 CLI | macOS 实测可用；**Windows 版 WorkBuddy 不带 codebuddy.exe**（2026-10 实测） | 注入 `~/.codebuddy/api.key`（ck_ key，必需） | 路径含 `app.asar.unpacked` |
+| 独立版 CodeBuddy CLI | macOS / Windows / Linux 官方支持 | CLI 自身登录态（首次运行 `codebuddy` 浏览器登录） | Windows 用户走这条：`irm https://copilot.tencent.com/cli/install.ps1 \| iex` 或 `npm i -g @tencent-ai/codebuddy-code` |
+
+wrapper（cbc-claude.js）按上表自动探测来源并选择认证方式；`CODEBUDDY_BIN` 环境变量可显式指定。
+
 ## 其他已知坑
 
 - **macOS BSD grep 不支持 `\|` 交替语法**（GNU BRE 特性），会静默返回 0 匹配——排查时一律用 `grep -E "a|b"`

@@ -109,7 +109,7 @@ cd <原版目录>/LLM_in_Word && ./install.sh --update-only     # 同理其余�
 
 - 模型列表前两项是 custom:qwen3.6-27b-fp8 / custom:gpt-5.5（CLI 返回顺序），日常建议选 GLM-5.3 或 Auto
 - hy3 与 hy3-x 显示名同为 "Hy3"（CLI 返回的 name 如此）
-- WorkBuddy.app 升级后内置 CLI 路径不变则无需处理；若路径变化，改 wrapper 里的 CB_BIN 即可
+- WorkBuddy.app 升级后内置 CLI 路径不变则无需处理；若路径变化或 bundle 结构调整，见 TROUBLESHOOTING.md（wrapper 已内置 bundle 自动探测）
 - API key 过期时：面板健康检查会显示"需要登录"，更新 ~/.codebuddy/api.key 即可
 - 从 WorkBuddy 应用内（如 AI 会话）直接手工调 CLI 仍会挂起（SERVER__PORT 等变量），经 wrapper 无此问题
 

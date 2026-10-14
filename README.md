@@ -41,7 +41,7 @@ cd llm-in-work-codebuddy
 # 1) 写入自己的 CodeBuddy API key（获取路径见上方；生图/抠图需要，聊天不需要）
 mkdir -p ~/.codebuddy && echo "ck_你的key" > ~/.codebuddy/api.key && chmod 600 ~/.codebuddy/api.key
 
-# 2) 部署 CLI 适配层（跨平台 wrapper，自动探测 WorkBuddy 内置 CLI）
+# 2) 部署 CLI 适配层（跨平台 wrapper：macOS 优先用 WorkBuddy 内嵌 CLI，也支持独立版 CLI）
 mkdir -p ~/.local/bin
 cp _windows/cbc-claude.js ~/.local/bin/cbc-claude.js && chmod +x ~/.local/bin/cbc-claude.js
 
@@ -56,16 +56,19 @@ cd ../LLM_in_Excel   && LLM_IN_EXCEL_CLAUDE_BIN=~/.local/bin/cbc-claude.js ./ins
 
 ## Windows 安装
 
-前置：Node.js 22.12+ 或 24+、Office 2016/365 桌面版；聊天功能需本机安装 WorkBuddy，生图/抠图仅需 API key（获取路径见上文）。
+前置：Node.js 22.12+ 或 24+、Office 2016/365 桌面版、**独立版 CodeBuddy CLI**（官方产品：
+`irm https://copilot.tencent.com/cli/install.ps1 | iex`，装完运行一次 `codebuddy` 完成登录；
+Windows 版 WorkBuddy 不自带 CLI，无需安装 WorkBuddy）。生图/抠图另需 API key（获取路径见上文）。
 
 **方式一（推荐）：让 AI 代跑** —— 打开 [`_windows/AI-INSTALL-PROMPT.md`](_windows/AI-INSTALL-PROMPT.md)，
-把提示词整段发给 Windows 电脑上的 WorkBuddy / Codex，按引导完成。
+把提示词整段发给 Windows 电脑上的 AI 助手，按引导完成。
 
 **方式二：手动** —— 按 [`_windows/README-WINDOWS.md`](_windows/README-WINDOWS.md)：
 
 ```powershell
 cd _windows
-.\install-codebuddy.ps1        # 写 API key + 部署 wrapper + 探测 CLI（会提示粘贴 ck_ key）
+.\install-codebuddy.ps1        # 写 API key + 部署 wrapper + 探测/代装 CLI
+# 若刚装 CLI：运行一次 codebuddy 完成浏览器登录
 # 重新打开 PowerShell，然后依次：
 cd ..\LLM_in_Word;         .\install.ps1
 cd ..\LLM_in_PowerPoint;   .\install.ps1

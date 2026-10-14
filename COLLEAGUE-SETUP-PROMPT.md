@@ -7,8 +7,11 @@
 
 请帮我在本机安装 GitHub 上的 LLM_in_Work × CodeBuddy 办公工具（Word / PowerPoint / Excel 的 AI 助手面板 + AI 生图 + 抠图）。请严格按步骤执行，每完成一步向我汇报结果再继续；任何一步失败，先看日志、把报错原文发给我，不要自行修改源码，也不要请求管理员/sudo 权限。
 
-【第 0 步·确认前置】
-1. 确认我已安装并登录 WorkBuddy（聊天功能需要；生图/抠图只需要 API key）。
+【第 0 步·确认前置（按平台）】
+- macOS：确认已安装并登录 WorkBuddy（聊天功能走它内嵌的 CLI；生图/抠图只需要 API key）。
+- Windows：不需要 WorkBuddy（Windows 版不带 CLI）。聊天功能需要**独立版 CodeBuddy CLI**——
+  检查 `codebuddy --version`，没有就装（irm https://copilot.tencent.com/cli/install.ps1 | iex），
+  装完运行一次 codebuddy 完成浏览器登录。
 
 【第 1 步·克隆仓库】
 仓库是公开的，直接：
@@ -34,7 +37,7 @@ Mac 建议装到 ~/llm-in-work-codebuddy，Windows 装到 D:\llm-in-work-codebud
 1. 健康检查（三个端口都应返回 {"ok":true,...}）：
    Word 8377 / PowerPoint 8387 / Excel 8397，浏览器访问 https://localhost:对应端口/api/ping
 2. 提醒我：完全退出 Office（Mac 按 ⌘Q，Windows 从托盘退出所有 Office 进程）再重新打开。
-3. 打开任一 Office 应用，「开始」功能区右侧应出现 LLM_in 按钮；点开面板，右上角「写作设置」里后端选 CodeBuddy (WorkBuddy)、模型选 glm-5.3。
+3. 打开任一 Office 应用，「开始」功能区右侧应出现 LLM_in 按钮；点开面板，右上角「设置」里后端选 CodeBuddy、模型选 glm-5.3（可选模型以面板实际列表为准）。
 4. 快速上手测试：PPT 里选中一段文字 → 点「图像」→「为选中内容配图 ✨」；或选中一张图片 → 点「图像」→ 自动进抠图 →「开始抠图」。
 
 【安全说明】
