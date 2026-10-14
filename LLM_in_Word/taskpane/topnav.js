@@ -17,11 +17,12 @@
   function injectStyle() {
     const style = document.createElement('style');
     style.textContent = [
-      '.llm-nav { display:flex; flex:none; background:var(--paper, #f7f8fa); border-bottom:1px solid var(--line, #e3e6ea); padding:7px 9px; gap:4px; }',
-      '.llm-nav-btn { flex:1; min-width:0; border:0; background:transparent; cursor:pointer; padding:7px 2px; font:inherit; font-size:12.5px; line-height:1.4; color:var(--muted, #6b7686); border-radius:9px; display:flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap; transition:background .12s, color .12s; }',
-      '.llm-nav-btn svg { flex:none; opacity:.9; }',
-      '.llm-nav-btn:hover { color:var(--accent, #2563eb); background:rgba(0,0,0,.05); }',
-      '.llm-nav-btn.on { color:var(--accent, #2563eb); font-weight:600; background:rgba(0,0,0,.06); background:color-mix(in srgb, var(--accent, #2563eb) 13%, transparent); }',
+      '.llm-nav { display:flex; flex:none; background:var(--paper, #f7f8fa); border-bottom:1px solid var(--line, #e3e6ea); padding:8px 10px; }',
+      '.llm-nav-seg { flex:1; display:flex; background:var(--card, #fff); border:1px solid var(--line, #e3e6ea); border-radius:11px; padding:3px; gap:2px; box-shadow:0 1px 2px rgba(16,24,40,.05); }',
+      '.llm-nav-btn { flex:1; min-width:0; border:0; background:transparent; cursor:pointer; padding:7px 2px; font:inherit; font-size:12.5px; line-height:1; color:var(--muted, #6b7686); border-radius:8px; display:flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap; transition:background .15s, color .15s, box-shadow .15s; }',
+      '.llm-nav-btn svg { flex:none; opacity:.85; }',
+      '.llm-nav-btn:hover { color:var(--accent, #2563eb); background:rgba(0,0,0,.04); }',
+      '.llm-nav-btn.on { color:#fff; font-weight:600; background:var(--accent, #2563eb); box-shadow:0 1px 3px rgba(0,0,0,.2); }',
       '.llm-nav-btn.on svg { opacity:1; }',
       'body.llm-nav-ready #mode-summary { display:none !important; }',
     ].join('\n');
@@ -29,10 +30,10 @@
   }
 
   const ICONS = {
-    ask: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 5h16v11H8l-4 3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 9.5h5M9.5 12h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
-    edit: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m14.5 5 4.5 4.5L8 20.5l-5 1 1-5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
-    format: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 10h16M10 10v10" stroke="currentColor" stroke-width="1.8"/></svg>',
-    image: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8.5" cy="10" r="1.5" fill="currentColor"/><path d="m5 17 4.5-4.5 3 3L16 12l3 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    ask: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 5h16v11H8l-4 3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 9.5h5M9.5 12h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    edit: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="m14.5 5 4.5 4.5L8 20.5l-5 1 1-5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    format: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 10h16M10 10v10" stroke="currentColor" stroke-width="1.8"/></svg>',
+    image: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8.5" cy="10" r="1.5" fill="currentColor"/><path d="m5 17 4.5-4.5 3 3L16 12l3 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   };
 
   function chatEls() {
@@ -59,6 +60,9 @@
     nav.className = 'llm-nav';
     nav.setAttribute('role', 'tablist');
     nav.setAttribute('aria-label', '工作模块');
+    const seg = document.createElement('div');
+    seg.className = 'llm-nav-seg';
+    nav.appendChild(seg);
     const btns = {};
     for (const t of tabs) {
       const b = document.createElement('button');
@@ -68,7 +72,7 @@
       b.setAttribute('role', 'tab');
       b.innerHTML = (ICONS[t.key] || '') + '<span>' + t.label + '</span>';
       b.addEventListener('click', () => activate(t, b));
-      nav.appendChild(b);
+      seg.appendChild(b);
       btns[t.key] = b;
     }
     hdr.insertAdjacentElement('afterend', nav);
