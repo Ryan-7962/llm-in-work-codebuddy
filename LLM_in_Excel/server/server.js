@@ -22,6 +22,7 @@ import { buildPrompt, buildTurnPrompt } from './prompt.js';
 import { getModels } from './models.js';
 import { getHealth } from './health.js';
 import { generateImage, matting, enhancePrompt } from './imagegen.js';
+import { formulaGen, batchFill, cleanSuggest } from './exceltools.js';
 import { classifyError } from './process.js';
 
 const VERSION = '0.1.0';
@@ -281,13 +282,33 @@ async function handleImageMatting(req, res) {
   }
 }
 
+// ---- /api/excel/*：公式生成 / 批量填充 / 数据清洗（统一 JSON 入口）----
+async function handleExcelTool(req, res, fn) {
+  let payload;
+  try {
+    payload = JSON.parse(await readBody(req, 2 * 1024 * 1024));
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, error: '请求解析失败' }));
+    return;
+  }
+  try {
+    const r = await fn(payload || {});
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, ...r }));
+  } catch (e) {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }));
+  }
+}
+
 // ---- 路由 ----
 async function handler(req, res) {
   const u = new URL(req.url, 'http://x');
   const p = u.pathname;
   const origin = req.headers.origin;
   const expectedOrigin = `${tlsOpts ? 'https' : 'http'}://${req.headers.host}`;
-  if ((origin && origin !== expectedOrigin) || ((p === '/api/chat' || p === '/api/image' || p === '/api/image/prompt' || p === '/api/image/matting') && !/^application\/json(?:;|$)/i.test(req.headers['content-type'] || ''))) {
+  if ((origin && origin !== expectedOrigin) || ((p === '/api/chat' || p === '/api/image' || p === '/api/image/prompt' || p === '/api/image/matting' || p === '/api/excel/formula' || p === '/api/excel/batchfill' || p === '/api/excel/clean') && !/^application\/json(?:;|$)/i.test(req.headers['content-type'] || ''))) {
     res.writeHead(403); res.end('Forbidden'); return;
   }
   try {
@@ -314,6 +335,12 @@ async function handler(req, res) {
       await handleImagePrompt(req, res);
     } else if (p === '/api/image/matting' && req.method === 'POST') {
       await handleImageMatting(req, res);
+    } else if (p === '/api/excel/formula' && req.method === 'POST') {
+      await handleExcelTool(req, res, formulaGen);
+    } else if (p === '/api/excel/batchfill' && req.method === 'POST') {
+      await handleExcelTool(req, res, batchFill);
+    } else if (p === '/api/excel/clean' && req.method === 'POST') {
+      await handleExcelTool(req, res, cleanSuggest);
     } else if (req.method === 'GET') {
       serveStatic(req, res, p.slice(1));
     } else {
