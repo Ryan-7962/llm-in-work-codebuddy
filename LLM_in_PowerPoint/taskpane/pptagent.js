@@ -92,71 +92,90 @@
     });
   }
 
-  // 读取整页形状（含文本），供计划生成
-  // 注意：PowerPoint.Shape 的类型属性名是 type（不是 shapeType，load 错名直接抛 0x80070057）
+  // 读取整页形状（含文本），供计划生成。
+  // Office.js 铁律（本轮踩坑总结）：
+  //   ① load 属性名必须精确（PowerPoint.Shape 是 type，不是 shapeType）；
+  //   ② 一次 sync 里任一请求失败，整批属性都不可用——不可靠的 load（如对图片形状
+  //      加载 textFrame）必须独立成轮、独立 catch，不能和核心字段混在同一个 sync；
+  //   ③ 读取属性值一律包 try，失败降级为空值。
   function readSlideShapes() {
     return PowerPoint.run(async (ctx) => {
       const slide = await getSlide(ctx);
       const size = await slideSize(ctx);
       const shapes = slide.shapes;
-      shapes.load('id,name,left,top,width,height');
+      // 第 1 轮：核心标量 + type，走集合级 items/ 路径（imagepanel 实测可用的模式）
+      shapes.load('items/id,items/name,items/left,items/top,items/width,items/height,items/type');
       await ctx.sync();
       const items = shapes.items || [];
+      // 第 2 轮：文本（对图片/色块形状可能失败）——独立 sync，失败只丢文本不炸读取
+      const texts = new Map();
+      try {
+        for (const s of items) s.load('textFrame/textRange/text');
+        await ctx.sync();
+        for (const s of items) {
+          try { texts.set(s.id, (s.textFrame && s.textFrame.textRange && s.textFrame.textRange.text) || ''); }
+          catch { texts.set(s.id, ''); }
+        }
+      } catch {}
+      const list = [];
       for (const s of items) {
-        try { s.load('type'); } catch {}
-        try { s.load('textFrame/textRange/text'); } catch {}
+        const rd = (fn) => { try { return fn(); } catch { return null; } };
+        const id = rd(() => s.id);
+        if (id == null) continue; // 读不出 id 的形状无法参与计划，跳过
+        list.push({
+          id,
+          name: rd(() => s.name) || '',
+          type: rd(() => String(s.type || '')) || '',
+          text: texts.get(id) || '',
+          left: rd(() => s.left), top: rd(() => s.top),
+          width: rd(() => s.width), height: rd(() => s.height),
+        });
       }
-      try { await ctx.sync(); } catch {}
-      const list = items.map((s) => {
-        let text = '';
-        try { text = (s.textFrame && s.textFrame.textRange && s.textFrame.textRange.text) || ''; } catch {}
-        return {
-          id: s.id, name: s.name, type: String(s.type || ''),
-          text, left: s.left, top: s.top, width: s.width, height: s.height,
-        };
-      });
-      return {
-        slide: size,
-        shapes: list,
-      };
+      return { slide: size, shapes: list };
     });
   }
 
-  // 快照：整页形状的可还原属性（文本/字体/字号/加粗/文字色/填充）
+  // 快照：整页形状的可还原属性（文本/字体/字号/加粗/文字色/填充）。
+  // 与 readSlideShapes 同一分轮原则：id 一轮（必须成功）、textFrame/font 一轮、fill 一轮。
   function snapshotSlide() {
     return PowerPoint.run(async (ctx) => {
       const slide = await getSlide(ctx);
       const shapes = slide.shapes;
-      shapes.load('id');
+      shapes.load('items/id');
       await ctx.sync();
       const items = shapes.items || [];
-      for (const s of items) {
-        // 拆开 load：一条路径无效不能拖垮整个快照
-        try {
+      // 第 2 轮：文本/字体（可能对无文本形状失败）
+      try {
+        for (const s of items) {
           s.load('textFrame/textRange/text,textFrame/textRange/font/name,textFrame/textRange/font/size,textFrame/textRange/font/bold,textFrame/textRange/font/color');
-        } catch {}
-        try { s.load('fill/type,fill/foregroundColor'); } catch {}
-      }
-      try { await ctx.sync(); } catch {}
+        }
+        await ctx.sync();
+      } catch {}
+      // 第 3 轮：填充（独立，fill 路径失败不影响文本快照）
+      try {
+        for (const s of items) s.load('fill/type,fill/foregroundColor');
+        await ctx.sync();
+      } catch {}
       return items.map((s) => {
-        const snap = { id: s.id, hadText: false };
-        try {
-          const tr = s.textFrame && s.textFrame.textRange;
-          if (tr) {
-            snap.hadText = true;
-            snap.text = tr.text || '';
-            snap.fontName = tr.font && tr.font.name;
-            snap.fontSize = tr.font && tr.font.size;
-            snap.bold = tr.font && tr.font.bold;
-            snap.color = tr.font && tr.font.color;
-          }
-        } catch {}
-        try {
-          snap.fillType = s.fill && s.fill.type;
-          snap.fillColor = s.fill && s.fill.foregroundColor;
-        } catch {}
+        const rd = (fn) => { try { return fn(); } catch { return undefined; } };
+        const snap = { id: rd(() => s.id), hadText: false };
+        if (snap.id == null) return null;
+        const tr = rd(() => s.textFrame && s.textFrame.textRange);
+        if (tr) {
+          snap.hadText = true;
+          snap.text = rd(() => tr.text) || '';
+          snap.fontName = rd(() => tr.font && tr.font.name);
+          snap.fontSize = rd(() => tr.font && tr.font.size);
+          snap.bold = rd(() => tr.font && tr.font.bold);
+          snap.color = rd(() => tr.font && tr.font.color);
+        }
+        const fill = rd(() => s.fill);
+        if (fill) {
+          snap.fillType = rd(() => fill.type);
+          snap.fillColor = rd(() => fill.foregroundColor);
+        }
         return snap;
-      });
+      }).filter(Boolean);
     });
   }
 
