@@ -93,15 +93,17 @@
   }
 
   // 读取整页形状（含文本），供计划生成
+  // 注意：PowerPoint.Shape 的类型属性名是 type（不是 shapeType，load 错名直接抛 0x80070057）
   function readSlideShapes() {
     return PowerPoint.run(async (ctx) => {
       const slide = await getSlide(ctx);
       const size = await slideSize(ctx);
       const shapes = slide.shapes;
-      shapes.load('id,shapeType,name,left,top,width,height');
+      shapes.load('id,name,left,top,width,height');
       await ctx.sync();
       const items = shapes.items || [];
       for (const s of items) {
+        try { s.load('type'); } catch {}
         try { s.load('textFrame/textRange/text'); } catch {}
       }
       try { await ctx.sync(); } catch {}
@@ -109,7 +111,7 @@
         let text = '';
         try { text = (s.textFrame && s.textFrame.textRange && s.textFrame.textRange.text) || ''; } catch {}
         return {
-          id: s.id, name: s.name, type: String(s.shapeType || ''),
+          id: s.id, name: s.name, type: String(s.type || ''),
           text, left: s.left, top: s.top, width: s.width, height: s.height,
         };
       });
@@ -129,9 +131,11 @@
       await ctx.sync();
       const items = shapes.items || [];
       for (const s of items) {
+        // 拆开 load：一条路径无效不能拖垮整个快照
         try {
-          s.load('textFrame/textRange/text,textFrame/textRange/font/name,textFrame/textRange/font/size,textFrame/textRange/font/bold,textFrame/textRange/font/color,fill/type,fill/foregroundColor');
+          s.load('textFrame/textRange/text,textFrame/textRange/font/name,textFrame/textRange/font/size,textFrame/textRange/font/bold,textFrame/textRange/font/color');
         } catch {}
+        try { s.load('fill/type,fill/foregroundColor'); } catch {}
       }
       try { await ctx.sync(); } catch {}
       return items.map((s) => {
