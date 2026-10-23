@@ -32,6 +32,14 @@
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const httpErr = (s) => '服务错误（HTTP ' + s + '）';
   const trunc = (s, n) => (String(s).length > n ? String(s).slice(0, n) + '…' : String(s));
+  // Office.js 裸错误码翻译（如 "Error code: 0x80070057"）
+  function friendlyErr(e) {
+    const msg = (e && e.message) ? String(e.message) : String(e);
+    const code = (e && e.code) || (msg.match(/0x[0-9A-Fa-f]{8}/) || [])[0] || '';
+    if (code === '0x80070057') return msg + '（Office 返回无效参数：通常是当前版本不支持某个属性，请把此提示截图反馈）';
+    if (/AccessDenied|0x80070005/i.test(code)) return msg + '（Office 拒绝访问：请先在幻灯片上点击任意位置再重试）';
+    return msg;
+  }
 
   // API 可用性只影响按钮可用，不影响视图创建（否则 topnav 隐藏聊天区后会白屏）
   const PPT_API_OK = (() => {
@@ -57,7 +65,8 @@
     }
   }
 
-  // ---- Office.js：当前页 ----
+  // ---- Office.js：当前页（注意：Slide 没有 width/height 属性，
+  //      尺寸要从 presentation.pageWidth/pageHeight 读，否则 load 抛 0x80070057） ----
   function getSlide(ctx) {
     return new Promise((resolve, reject) => {
       const sel = ctx.presentation.getSelectedSlides();
@@ -65,9 +74,21 @@
       ctx.sync().then(() => {
         const slide = sel.items && sel.items[0];
         if (!slide) { reject(new Error(T.noSlide)); return; }
-        slide.load('width, height');
-        ctx.sync().then(() => resolve(slide)).catch(reject);
+        resolve(slide);
       }).catch(reject);
+    });
+  }
+
+  // 画布尺寸：presentation.pageWidth/pageHeight（读不到兜底 960×540）
+  function slideSize(ctx) {
+    return new Promise((resolve) => {
+      try {
+        ctx.presentation.load('pageWidth,pageHeight');
+        ctx.sync().then(() => {
+          const w = ctx.presentation.pageWidth, h = ctx.presentation.pageHeight;
+          resolve(w > 0 && h > 0 ? { width: w, height: h } : { width: 960, height: 540 });
+        }).catch(() => resolve({ width: 960, height: 540 }));
+      } catch { resolve({ width: 960, height: 540 }); }
     });
   }
 
@@ -75,6 +96,7 @@
   function readSlideShapes() {
     return PowerPoint.run(async (ctx) => {
       const slide = await getSlide(ctx);
+      const size = await slideSize(ctx);
       const shapes = slide.shapes;
       shapes.load('id,shapeType,name,left,top,width,height');
       await ctx.sync();
@@ -92,7 +114,7 @@
         };
       });
       return {
-        slide: { width: slide.width || 960, height: slide.height || 540 },
+        slide: size,
         shapes: list,
       };
     });
@@ -318,7 +340,7 @@
         setStatus(T.readOk(slideCtx.shapes.length));
         return true;
       } catch (e) {
-        setStatus((e && e.message) ? e.message : String(e), true);
+        setStatus(friendlyErr(e), true);
         return false;
       } finally {
         readBtn.disabled = false;
@@ -356,7 +378,7 @@
         stepsWrap.classList.remove('hidden');
         setStatus('✓ 计划已生成（共 ' + plan.length + ' 步），确认勾选后点「执行选中步骤」');
       } catch (e) {
-        setStatus(T.planFail + '：' + (e && e.message ? e.message : e), true);
+        setStatus(T.planFail + '：' + friendlyErr(e), true);
       } finally {
         planBtn.disabled = false;
       }
@@ -387,14 +409,14 @@
           state[i] = 'done'; okCount++;
         } catch (e) {
           state[i] = 'fail'; failIdx = i;
-          failErr = (e && e.message) ? e.message : String(e);
+          failErr = friendlyErr(e);
           break;
         }
         renderSteps(state.slice());
       }
       for (let i = 0; i < plan.length; i++) if (state[i] === null && i > (failIdx >= 0 ? failIdx : -1)) state[i] = 'skip';
       renderSteps(state);
-      if (failIdx >= 0) setStatus(T.execStop(failIdx, failErr), true);
+        if (failIdx >= 0) setStatus(T.execStop(failIdx, failErr), true);
       else setStatus(T.execDone(okCount, plan.length - okCount));
       undoBtn.classList.remove('hidden');
       executing = false;
