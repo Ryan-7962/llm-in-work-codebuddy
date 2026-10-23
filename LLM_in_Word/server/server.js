@@ -21,7 +21,7 @@ import { runModel } from './cli.js';
 import { buildPrompt, buildTurnPrompt } from './prompt.js';
 import { getModels } from './models.js';
 import { getHealth } from './health.js';
-import { generateImage, matting, enhancePrompt } from './imagegen.js';
+import { generateImage, listEngines, matting, enhancePrompt } from './imagegen.js';
 import { classifyError } from './process.js';
 
 const VERSION = '0.7.2';
@@ -232,7 +232,7 @@ async function handleImage(req, res) {
     return;
   }
   try {
-    const r = await generateImage({ prompt: payload?.prompt, size: payload?.size, count: payload?.count });
+    const r = await generateImage({ prompt: payload?.prompt, size: payload?.size, count: payload?.count, engine: payload?.engine });
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, images: r.images, usage: r.usage }));
   } catch (e) {
@@ -310,6 +310,16 @@ async function handler(req, res) {
       await handleChat(req, res);
     } else if (p === '/api/image' && req.method === 'POST') {
       await handleImage(req, res);
+    } else if (p === '/api/image/engines' && req.method === 'GET') {
+      // 可用生图引擎列表（hy / jimeng / custom:*），面板下拉用
+      try {
+        const engines = await listEngines();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ ok: true, engines }));
+      } catch (e) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }));
+      }
     } else if (p === '/api/image/prompt' && req.method === 'POST') {
       await handleImagePrompt(req, res);
     } else if (p === '/api/image/matting' && req.method === 'POST') {

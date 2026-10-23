@@ -104,15 +104,30 @@
     });
   }
 
-  // ---- Office.js：写回 ----
-  async function writeRange(sheetName, rowIndex, columnIndex, rows2d, isFormula) {
+  // ---- Office.js：写回（写前自动快照原区域，供「撤销上次写入」） ----
+  let undoData = null;   // { sheetName, rowIndex, columnIndex, isFormula, snap:{values,formulas} }
+  let undoCb = null;     // init() 里注册：写入成功后显示撤销按钮
+  async function snapshotRange(sheetName, rowIndex, columnIndex, rowCount, columnCount) {
     return Excel.run(async (ctx) => {
+      const ws = ctx.workbook.worksheets.getItem(sheetName);
+      const range = ws.getRangeByIndexes(rowIndex, columnIndex, rowCount, columnCount);
+      range.load('values,formulas');
+      await ctx.sync();
+      return { values: range.values, formulas: range.formulas };
+    });
+  }
+  async function writeRange(sheetName, rowIndex, columnIndex, rows2d, isFormula) {
+    // 先快照目标区域原内容（写入失败不记录，成功才可撤销）
+    const snap = await snapshotRange(sheetName, rowIndex, columnIndex, rows2d.length, rows2d[0].length);
+    await Excel.run(async (ctx) => {
       const ws = ctx.workbook.worksheets.getItem(sheetName);
       const range = ws.getRangeByIndexes(rowIndex, columnIndex, rows2d.length, rows2d[0].length);
       if (isFormula) range.formulas = rows2d;
       else range.values = rows2d;
       await ctx.sync();
     });
+    undoData = { sheetName, rowIndex, columnIndex, isFormula, snap };
+    if (undoCb) undoCb();
   }
 
   function post(url, body) {
@@ -148,7 +163,7 @@
       '<button id="xv-tab-f" class="xv-tab on" type="button">' + esc(T.tabFormula) + '</button>' +
       '<button id="xv-tab-l" class="xv-tab" type="button">' + esc(T.tabFill) + '</button>' +
       '<button id="xv-tab-c" class="xv-tab" type="button">' + esc(T.tabClean) + '</button>' +
-      '</span></div>' +
+      '</span><button id="xv-undo" class="xv-btn ghost" type="button" style="display:none; margin-left:4px; padding:4px 10px; font-size:11.5px; font-weight:400;">↩︎ 撤销上次写入</button></div>' +
       '<div class="xv-body">' +
 
       // ---- 公式页 ----
@@ -228,8 +243,40 @@
       });
     }
 
+    // ---- 撤销上次写入（单级：最近一次成功的 writeRange） ----
+    const undoBtn = $('xv-undo');
+    undoCb = () => { undoBtn.style.display = ''; };
+    undoBtn.addEventListener('click', async () => {
+      if (!undoData) return;
+      undoBtn.disabled = true;
+      const d = undoData;
+      try {
+        await Excel.run(async (ctx) => {
+          const ws = ctx.workbook.worksheets.getItem(d.sheetName);
+          const range = ws.getRangeByIndexes(d.rowIndex, d.columnIndex, d.snap.values.length, d.snap.values[0].length);
+          if (d.isFormula) range.formulas = d.snap.formulas;
+          else range.values = d.snap.values;
+          await ctx.sync();
+        });
+        undoData = null;
+        undoBtn.style.display = 'none';
+        // 状态提示到当前激活的 tab
+        const activeStatus = document.querySelector('.xv-page.on');
+        const stMap = { 'xv-page-f': fStatusEl, 'xv-page-l': lStatusEl, 'xv-page-c': cStatusEl };
+        const st = activeStatus && stMap[activeStatus.id];
+        if (st) setStatus(st, '✓ 已撤销上次写入，恢复为原内容');
+      } catch (e) {
+        const activeStatus = document.querySelector('.xv-page.on');
+        const stMap = { 'xv-page-f': fStatusEl, 'xv-page-l': lStatusEl, 'xv-page-c': cStatusEl };
+        const st = activeStatus && stMap[activeStatus.id];
+        if (st) setStatus(st, '撤销失败：' + e.message, true);
+      } finally {
+        undoBtn.disabled = false;
+      }
+    });
+
     // ---- ① 公式 ----
-    const fDesc = $('xv-f-desc'), fGen = $('xv-f-gen'), fStatus = $('xv-f-status');
+    const fDesc = $('xv-f-desc'), fGen = $('xv-f-gen'), fStatus = $('xv-f-status'), fStatusEl = fStatus;
     const fResult = $('xv-f-result'), fFormula = $('xv-f-formula'), fFallback = $('xv-f-fallback'), fFbwrap = $('xv-f-fbwrap'), fExpl = $('xv-f-expl'), fWrite = $('xv-f-write');
     fGen.addEventListener('click', async () => {
       const desc = fDesc.value.trim();
@@ -266,6 +313,7 @@
     let lSel = null;
     const lRead = $('xv-l-read'), lHdr = $('xv-l-hdr'), lSelinfo = $('xv-l-selinfo'), lChips = $('xv-l-chips');
     const lTpl = $('xv-l-tpl'), lGen = $('xv-l-gen'), lStatus = $('xv-l-status'), lResult = $('xv-l-result'), lPreview = $('xv-l-preview'), lWrite = $('xv-l-write');
+    const lStatusEl = lStatus;
     let lResults = null;
     lRead.addEventListener('click', async () => {
       try {
@@ -326,6 +374,7 @@
     let cSel = null, cClean = null;
     const cRead = $('xv-c-read'), cHdr = $('xv-c-hdr'), cSelinfo = $('xv-c-selinfo'), cInstr = $('xv-c-instr');
     const cGen = $('xv-c-gen'), cStatus = $('xv-c-status'), cResult = $('xv-c-result'), cNotes = $('xv-c-notes'), cDiff = $('xv-c-diff'), cApply = $('xv-c-apply');
+    const cStatusEl = cStatus;
     cRead.addEventListener('click', async () => {
       try {
         cSel = await readSelection();

@@ -1,5 +1,6 @@
 // AI 图像模块（CodeBuddy · WorkBuddy）：文生图 + 上下文配图 + 抠图。
 // v3：从弹窗升级为一级视图（由 topnav.js 的「图像」tab 驱动，监听 llm-image-view 事件）。
+// v4（2026-10-23）：多生图引擎——默认混元（hy），检测到即梦 CLI 或自定义引擎时出现下拉切换。
 // - 插图：读选中文字 → AI 生成中文画面描述（六要素、120–200 字，可修改）→ 风格 chips →
 //         多候选（默认 2 张，点选后插入）→ 会话内历史缩略图
 // - 抠图：PPT 选中图片自动载入；完成后可「替换原图」（同位置同尺寸）或「插入为新图」
@@ -33,7 +34,11 @@
     noSel: '没有读到选中的文字，请先在幻灯片/文档里选中一段内容再试',
     selLabel: '选中内容', promptLabel: '画面描述（中文，可直接修改）',
     promptPh: '描述想要的插图，例如：一株茂盛的薰衣草与薄荷叶交叠的植物插画，扁平商务插画风，薄荷绿与淡紫主色调，浅米白背景，构图居中留白…也可以先选中文字，点上方按钮自动生成描述',
-    styleLabel: '风格', sizeLabel: '尺寸', countLabel: '候选',
+    styleLabel: '风格', sizeLabel: '尺寸', countLabel: '候选', engineLabel: '引擎',
+    engineNoteHy: '每张约 5.7 点额度（CodeBuddy 账户）；生成后先预览，满意再插入。',
+    engineNoteJimeng: '即梦生图按即梦积分计费（单张上限可在 ~/.codebuddy/image-engines.json 的 jimeng.creditCeiling 配置）；服务端会自动把分辨率调到模型支持的档位。',
+    engineNoteCustom: '走自定义图片 API 计费（配置见 ~/.codebuddy/image-engines.json）。',
+    engineLoadFail: '引擎列表获取失败，默认使用混元',
     gen: '生成预览', gening: '生成中…（约 10–30 秒）', regen: '重新生成',
     insert: '插入选中图片', inserting: '插入中…', inserted: '已插入 ✓',
     needPrompt: '请先填写画面描述，或选中文字后点「为选中内容配图」',
@@ -269,6 +274,7 @@
       STYLES.map(([v, l], i) => '<button type="button" class="schip' + (i === 0 ? ' on' : '') + '" data-v="' + esc(v) + '">' + esc(l) + '</button>').join('') +
       '</span></label>' +
       '<div class="img-row" style="gap:14px;">' +
+      '<label class="flabel" id="img-engine-wrap" style="display:none;">' + esc(T.engineLabel) + ' <select id="img-engine"></select></label>' +
       '<label class="flabel">' + esc(T.sizeLabel) + ' <select id="img-size">' + SIZES.map(([v, l]) => '<option value="' + v + '">' + esc(l) + '</option>').join('') + '</select></label>' +
       '<label class="flabel">' + esc(T.countLabel) + ' <select id="img-count"><option value="1">1 张</option><option value="2" selected>2 张</option><option value="3">3 张</option></select></label>' +
       '<span class="flabel mini" id="img-cost"></span>' +
@@ -338,6 +344,8 @@
     const tabGen = $('img-tab-gen'), tabMat = $('img-tab-mat');
     const pageGen = $('img-page-gen'), pageMat = $('img-page-mat');
     const promptEl = $('img-prompt'), sizeEl = $('img-size'), countEl = $('img-count'), costEl = $('img-cost');
+    const engineWrap = $('img-engine-wrap'), engineSel = $('img-engine');
+    const costNote = panel.querySelector('.img-note'); // 引擎说明（首段）
     const fromSel = $('img-fromsel'), gen = $('img-gen'), insert = $('img-insert'), regen = $('img-regen');
     const status = $('img-status'), preview = $('img-preview'), selCard = $('img-selcard');
     const clipBtn = $('img-clip'), fromShape = $('img-fromshape'), drop = $('img-drop'), pick = $('img-pick'), fileInput = $('img-file');
@@ -351,19 +359,66 @@
     let curStyle = '';          // 当前风格
     let matSource = null, matResult = null;
     const history = [];         // 会话内生成历史 [{ b64, mime }]
+    let curEngine = 'hy';       // 当前生图引擎（hy / jimeng / custom:*）
+    let enginesLoaded = false;
 
     if (host !== 'ppt') fromShape.classList.add('hidden'); // 读取选中图片仅 PPT
+
+    // ---- 引擎列表：GET api/image/engines，多于 1 个可选时才显示下拉 ----
+    async function loadEngines() {
+      let data;
+      try {
+        const resp = await fetch('api/image/engines');
+        data = await resp.json();
+        if (!data.ok || !Array.isArray(data.engines)) throw new Error(data.error || 'bad');
+      } catch {
+        if (!enginesLoaded) costNote.textContent = T.engineLoadFail;
+        return;
+      }
+      const engines = data.engines;
+      const selectable = engines.filter((e) => e && e.available);
+      // 只有混元一个可用引擎时隐藏下拉，保持界面干净
+      if (selectable.length <= 1 && engines.every((e) => e.id === 'hy')) {
+        engineWrap.style.display = 'none';
+        enginesLoaded = true;
+        return;
+      }
+      engineWrap.style.display = '';
+      engineSel.innerHTML = engines.map((e) => {
+        const label = esc(e.name || e.id) + (e.model ? ' · ' + esc(e.model) : '');
+        return '<option value="' + esc(e.id) + '"' + (e.available ? '' : ' disabled') + '>' + label + (e.available ? '' : '（不可用）') + '</option>';
+      }).join('');
+      // 默认选混元；不可用时选第一个可用引擎
+      const def = engines.find((e) => e.id === 'hy' && e.available) || selectable[0];
+      if (def) { engineSel.value = def.id; curEngine = def.id; }
+      enginesLoaded = true;
+      updateEngineNote();
+    }
+    function updateEngineNote() {
+      const n = Number(countEl.value) || 1;
+      if (curEngine === 'jimeng') {
+        costEl.textContent = '按即梦积分计费';
+        costNote.textContent = T.engineNoteJimeng;
+      } else if (curEngine.startsWith('custom:')) {
+        costEl.textContent = 'API 计费';
+        costNote.textContent = T.engineNoteCustom;
+      } else {
+        costEl.textContent = '约 ' + (n * EST_CREDIT).toFixed(1) + ' 点/次';
+        costNote.textContent = T.engineNoteHy;
+      }
+    }
+    engineSel.addEventListener('change', () => { curEngine = engineSel.value; updateEngineNote(); });
+    loadEngines();
 
     function setStatus(el, text, isErr) {
       el.textContent = text || '';
       el.classList.toggle('err', !!isErr);
     }
     function updateCost() {
-      const n = Number(countEl.value) || 1;
-      costEl.textContent = '约 ' + (n * EST_CREDIT).toFixed(1) + ' 点/次';
+      updateEngineNote();
     }
     countEl.addEventListener('change', updateCost);
-    updateCost();
+    updateEngineNote();
 
     // tab 切换
     function switchTab(mat) {
@@ -377,8 +432,11 @@
     // 视图显隐由 topnav.js 驱动（llm-image-view 事件）
     document.addEventListener('llm-image-view', (e) => {
       panel.classList.toggle('hidden', !e.detail?.show);
-      if (e.detail?.show && host === 'ppt') {
-        autoDetect(true).then((ok) => { if (ok) { switchTab(true); setStatus(matStatus, T.autoLoaded); } });
+      if (e.detail?.show) {
+        loadEngines(); // 重新拉一次，即梦登录态/自定义配置可能刚变化
+        if (host === 'ppt') {
+          autoDetect(true).then((ok) => { if (ok) { switchTab(true); setStatus(matStatus, T.autoLoaded); } });
+        }
       }
     });
 
@@ -588,7 +646,7 @@
         const resp = await fetch('api/image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, size: sizeEl.value, count: n }),
+          body: JSON.stringify({ prompt, size: sizeEl.value, count: n, engine: curEngine }),
         });
         const data = await resp.json().catch(() => ({ ok: false, error: httpErr(resp.status) }));
         if (!data.ok || !Array.isArray(data.images) || !data.images.length) {
@@ -596,8 +654,9 @@
         }
         renderCandidates(data.images);
         data.images.forEach(pushHistory);
+        const engName = curEngine === 'jimeng' ? '（即梦）' : curEngine.startsWith('custom:') ? '（' + (engineSel.selectedOptions[0]?.textContent.split(' · ')[0] || '自定义') + '）' : '';
         const credit = data.usage && typeof data.usage.credit === 'number' ? '（消耗 ' + data.usage.credit + ' 点额度）' : '';
-        setStatus(status, '✓ 已生成 ' + data.images.length + ' 张' + credit + ' · ' + T.pickCandidate);
+        setStatus(status, '✓ 已生成 ' + data.images.length + ' 张' + engName + credit + ' · ' + T.pickCandidate);
         insert.classList.remove('hidden');
         regen.classList.remove('hidden');
       } catch (e) {

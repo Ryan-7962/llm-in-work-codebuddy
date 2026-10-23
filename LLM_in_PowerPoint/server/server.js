@@ -21,7 +21,8 @@ import { runModel } from './cli.js';
 import { buildPrompt, buildTurnPrompt } from './prompt.js';
 import { getModels } from './models.js';
 import { getHealth } from './health.js';
-import { generateImage, matting, enhancePrompt } from './imagegen.js';
+import { generateImage, listEngines, matting, enhancePrompt } from './imagegen.js';
+import { planEdit } from './pptagent.js';
 import { classifyError } from './process.js';
 
 const VERSION = '0.3.0';
@@ -232,7 +233,7 @@ async function handleImage(req, res) {
     return;
   }
   try {
-    const r = await generateImage({ prompt: payload?.prompt, size: payload?.size, count: payload?.count });
+    const r = await generateImage({ prompt: payload?.prompt, size: payload?.size, count: payload?.count, engine: payload?.engine });
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, images: r.images, usage: r.usage }));
   } catch (e) {
@@ -281,13 +282,33 @@ async function handleImageMatting(req, res) {
   }
 }
 
+// ---- /api/ppt/plan：智能排版 Agent——形状列表 + 指令 → 操作计划（客户端预览后执行） ----
+async function handlePptPlan(req, res) {
+  let payload;
+  try {
+    payload = JSON.parse(await readBody(req, 4 * 1024 * 1024));
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, error: '请求解析失败' }));
+    return;
+  }
+  try {
+    const r = await planEdit({ instruction: payload?.instruction, shapes: payload?.shapes, slide: payload?.slide });
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, steps: r.steps }));
+  } catch (e) {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }));
+  }
+}
+
 // ---- 路由 ----
 async function handler(req, res) {
   const u = new URL(req.url, 'http://x');
   const p = u.pathname;
   const origin = req.headers.origin;
   const expectedOrigin = `${tlsOpts ? 'https' : 'http'}://${req.headers.host}`;
-  if ((origin && origin !== expectedOrigin) || ((p === '/api/chat' || p === '/api/image' || p === '/api/image/prompt' || p === '/api/image/matting') && !/^application\/json(?:;|$)/i.test(req.headers['content-type'] || ''))) {
+  if ((origin && origin !== expectedOrigin) || ((p === '/api/chat' || p === '/api/image' || p === '/api/image/prompt' || p === '/api/image/matting' || p === '/api/ppt/plan') && !/^application\/json(?:;|$)/i.test(req.headers['content-type'] || ''))) {
     res.writeHead(403); res.end('Forbidden'); return;
   }
   try {
@@ -310,10 +331,22 @@ async function handler(req, res) {
       await handleChat(req, res);
     } else if (p === '/api/image' && req.method === 'POST') {
       await handleImage(req, res);
+    } else if (p === '/api/image/engines' && req.method === 'GET') {
+      // 可用生图引擎列表（hy / jimeng / custom:*），面板下拉用
+      try {
+        const engines = await listEngines();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ ok: true, engines }));
+      } catch (e) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }));
+      }
     } else if (p === '/api/image/prompt' && req.method === 'POST') {
       await handleImagePrompt(req, res);
     } else if (p === '/api/image/matting' && req.method === 'POST') {
       await handleImageMatting(req, res);
+    } else if (p === '/api/ppt/plan' && req.method === 'POST') {
+      await handlePptPlan(req, res);
     } else if (req.method === 'GET') {
       serveStatic(req, res, p.slice(1));
     } else {

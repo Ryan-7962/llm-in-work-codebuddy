@@ -80,3 +80,21 @@ wrapper（cbc-claude.js）按上表自动探测来源并选择认证方式；`CO
 - **macOS BSD grep 不支持 `\|` 交替语法**（GNU BRE 特性），会静默返回 0 匹配——排查时一律用 `grep -E "a|b"`
 - **launchctl 在 WorkBuddy 会话内执行必报 EIO**（provenance 限制）——LaunchAgent 注册要在用户自己的 Terminal 跑
 - **Office 面板改动前端文件后**：HTML 引用的静态资源带 `?v=` 版本号，改动文件后需要 bump 版本号（`taskpane.html` 里搜 `v=`）强制刷新
+
+## 案例 B：即梦生图报 `cli.transport_failed`（服务进程带着死代理）
+
+**症状**：图像页选即梦引擎生成，报「即梦生图失败：The service could not be reached…」；但同一台机器在终端直接跑 `dreamina-canvas node create image …` 却成功。
+
+**根因**（2026-10-23 实测）：旧版 install.sh 把**安装那一刻的代理端口快照**进 `~/.llm_in_*/run.sh`（如 `export HTTPS_PROXY=http://127.0.0.1:51200`）。launchd 拉起的服务进程不带 `~/.zshrc`，只认 run.sh 里这份快照——代理端口一变（51200 → 7897），服务进程就拿着死代理出网。即梦 CLI（Go 二进制）读代理变量必走死代理；而混元引擎不受影响（Node fetch 不读 `HTTP_PROXY`，一直直连），所以聊天/混元生图正常、唯独即梦失败，极易误判为即梦服务端故障。
+
+**修复**（三层，已进仓库）：
+
+1. `run.sh` / `install.sh` 模板：不再快照代理，启动时动态读 macOS 系统代理（`scutil --proxy`）
+2. `imagegen.js`：spawn 即梦 CLI 前做**代理活性探测**（TCP 连一下端口，600ms）——代理变量指向的端口没监听就自动换系统代理，系统代理也不行就清掉变量直连
+3. 错误透传：CLI 的 JSON 错误对象（在 stderr）会被解析出 `code/message`，`transport_failed` 附带代理配置指引
+
+**手动修复存量安装**（已装用户不想重跑 install.sh）：编辑 `~/.llm_in_{word,powerpoint,excel}/run.sh`，把硬编码的 `export …_PROXY=http://127.0.0.1:旧端口` 四行删掉，替换为动态块（见 install.sh 生成的最新模板），然后 `pkill -f "llm_in_.*app/server"` 让 launchd 重拉。
+
+**验证**：`curl -k https://127.0.0.1:8387/api/image/engines` 应看到 `{"id":"jimeng","available":true}`；POST `/api/image` 带 `"engine":"jimeng"` 能出图即通。
+
+**教训**：任何「把环境快照进配置」的方案（代理端口、CLI 路径、版本号）都要考虑漂移；跨进程网络问题的第一怀疑对象应该是**环境差异**（shell vs launchd），用 `env -i` 最小环境复现是定位利器。

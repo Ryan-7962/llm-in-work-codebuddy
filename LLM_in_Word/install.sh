@@ -82,11 +82,21 @@ CLAUDE_PATH="${LLM_IN_WORD_CLAUDE_BIN:-${WORD_EDIT_CLAUDE_BIN:-$(command -v clau
 CODEX_PATH="${LLM_IN_WORD_CODEX_BIN:-${WORD_EDIT_CODEX_BIN:-$(command -v codex || true)}}"
 # 用 printf %q 生成安全的 shell 字面量，不 eval 代理值，也不把凭证打印到日志。
 {
-  printf '#!/bin/zsh\n# 由 install.sh 生成；代理或 CLI 路径变化后重跑安装。\n'
-  for v in http_proxy https_proxy all_proxy no_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY; do
-    val="$(printenv "$v" || true)"
-    if [ -n "$val" ]; then printf 'export %s=%q\n' "$v" "$val"; fi
-  done
+  printf '#!/bin/zsh\n# 由 install.sh 生成；CLI 路径变化后重跑安装。\n'
+  # 代理不再快照（旧版把安装时的端口烤进来，代理端口一变服务就带着死代理）；
+  # 改为运行时动态读 macOS 系统代理。
+  cat <<'PXBLOCK'
+# 代理：动态读 macOS 系统代理（不要把安装时的端口快照进来）
+_pxy_en=$(scutil --proxy | awk '/HTTPEnable/{print $3}')
+_pxy_host=$(scutil --proxy | awk '/HTTPProxy/{print $3}' | head -1)
+_pxy_port=$(scutil --proxy | awk '/HTTPPort/{print $3}' | head -1)
+if [ "$_pxy_en" = "1" ] && [ -n "$_pxy_host" ] && [ -n "$_pxy_port" ]; then
+  export http_proxy="http://${_pxy_host}:${_pxy_port}"
+  export https_proxy="$http_proxy"
+  export HTTP_PROXY="$http_proxy"
+  export HTTPS_PROXY="$http_proxy"
+fi
+PXBLOCK
   if [ -n "$CLAUDE_PATH" ]; then printf 'export LLM_IN_WORD_CLAUDE_BIN=%q\n' "$CLAUDE_PATH"; fi
   if [ -n "$CODEX_PATH" ]; then printf 'export LLM_IN_WORD_CODEX_BIN=%q\n' "$CODEX_PATH"; fi
   printf 'export LLM_IN_WORD_DATA_DIR=%q\n' "$BASE"

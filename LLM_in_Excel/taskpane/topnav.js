@@ -1,6 +1,7 @@
-// 顶部一级导航（三套件通用）：问答 | 改写 | 版式 | 图像。
+// 顶部一级导航（三套件通用）：问答 | 改写 | 版式 | 图像 |（Excel 追加：表格 | PPT 追加：智能）。
 // 自包含模块：零改动 taskpane.js——问答/改写/版式通过程序化点击 settings-pop 里
-// 已有的 mode-tab 按钮复用原逻辑；图像 tab 切换「对话视图 ↔ 图像视图」。
+// 已有的 mode-tab 按钮复用原逻辑；工具类 tab（图像/表格/智能）切换对话视图 ↔ 工具视图。
+// 多工具视图互斥：同一时刻只显示一个工具视图（#img-view / #excel-view / #agent-view）。
 // 界面固定中文（用户要求全中文）。
 (() => {
   'use strict';
@@ -12,6 +13,8 @@
     edit: '改写', editTitle: '选中内容 → 指令 → 预览 → 写入',
     format: '版式', formatTitle: '调整选中形状或整页版式',
     image: '图像', imageTitle: 'AI 插图与抠图',
+    excel: '表格', excelTitle: 'AI 公式 / 批量填充 / 数据清洗',
+    agent: '智能', agentTitle: '读当前页 → AI 出修改计划 → 确认后执行',
   };
 
   function injectStyle() {
@@ -34,6 +37,23 @@
     edit: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="m14.5 5 4.5 4.5L8 20.5l-5 1 1-5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
     format: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 10h16M10 10v10" stroke="currentColor" stroke-width="1.8"/></svg>',
     image: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8.5" cy="10" r="1.5" fill="currentColor"/><path d="m5 17 4.5-4.5 3 3L16 12l3 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    excel: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 10h16M4 15h16M10 4v16" stroke="currentColor" stroke-width="1.8"/></svg>',
+    agent: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" fill="currentColor"/></svg>',
+  };
+
+  // 工具视图注册表：key → 视图选择器 + 显隐回调（imagepanel.js 监听事件做自动载图）
+  const TOOL_VIEWS = {
+    image: {
+      sel: '#img-view',
+      onShow: () => document.dispatchEvent(new CustomEvent('llm-image-view', { detail: { show: true } })),
+      onHide: () => document.dispatchEvent(new CustomEvent('llm-image-view', { detail: { show: false } })),
+    },
+    excel: { sel: '#excel-view', onShow: null, onHide: null },
+    agent: {
+      sel: '#agent-view',
+      onShow: () => document.dispatchEvent(new CustomEvent('llm-agent-view', { detail: { show: true } })),
+      onHide: () => document.dispatchEvent(new CustomEvent('llm-agent-view', { detail: { show: false } })),
+    },
   };
 
   function chatEls() {
@@ -49,13 +69,17 @@
     const hdr = document.querySelector('.hdr');
     if (!hdr || !hdr.parentElement) return;
 
-    // 可用模块探测：Word/Excel 无版式
+    // 可用模块探测：Word/Excel 无版式；Excel 追加「表格」（excelpanel.js 只在 Excel 套件加载）
+    const isExcel = !!document.querySelector('script[src*="grid-utils.js"]');
+    const isPptAgent = !!document.querySelector('script[src*="pptagent.js"]'); // 仅 PowerPoint 套件加载
     const tabs = [
       { key: 'ask', mode: 'mode-ask', label: T.ask, title: T.askTitle },
       { key: 'edit', mode: 'mode-edit', label: T.edit, title: T.editTitle },
     ];
     if (document.getElementById('mode-format')) tabs.push({ key: 'format', mode: 'mode-format', label: T.format, title: T.formatTitle });
-    tabs.push({ key: 'image', mode: null, label: T.image, title: T.imageTitle });
+    tabs.push({ key: 'image', mode: null, view: 'image', label: T.image, title: T.imageTitle });
+    if (isExcel) tabs.push({ key: 'excel', mode: null, view: 'excel', label: T.excel, title: T.excelTitle });
+    if (isPptAgent) tabs.push({ key: 'agent', mode: null, view: 'agent', label: T.agent, title: T.agentTitle });
 
     const nav = document.createElement('nav');
     nav.className = 'llm-nav';
@@ -79,25 +103,22 @@
     hdr.insertAdjacentElement('afterend', nav);
     document.body.classList.add('llm-nav-ready'); // 启用隐藏 context-bar 里冗余的模式按钮（导航已表达当前模式）
 
-    let lastModeKey = 'edit'; // 回退目标：图像 → 上一个对话模式
-    let imageView = false;
+    let lastModeKey = 'edit'; // 回退目标：工具视图 → 上一个对话模式
+    let activeTool = null;    // null = 对话视图；'image' | 'excel' | 'agent' = 工具视图
 
-    function setView(viewImage) {
-      const imgView = document.getElementById('img-view');
-      if (viewImage) {
-        chatEls().forEach((el) => el.classList.add('llm-nav-hide'));
-        if (imgView) {
-          imgView.classList.remove('hidden');
-          document.dispatchEvent(new CustomEvent('llm-image-view', { detail: { show: true } }));
-        }
-      } else {
-        if (imgView && !imgView.classList.contains('hidden')) {
-          imgView.classList.add('hidden');
-          document.dispatchEvent(new CustomEvent('llm-image-view', { detail: { show: false } }));
-        }
-        chatEls().forEach((el) => el.classList.remove('llm-nav-hide'));
+    function setToolView(tool) {
+      // 所有工具视图先按目标归位（互斥），再触发回调
+      for (const [k, cfg] of Object.entries(TOOL_VIEWS)) {
+        const el = document.querySelector(cfg.sel);
+        if (!el) continue;
+        const showing = k === tool;
+        const wasHidden = el.classList.contains('hidden');
+        el.classList.toggle('hidden', !showing);
+        if (showing) { if (cfg.onShow) cfg.onShow(); }
+        else if (!wasHidden) { if (cfg.onHide) cfg.onHide(); }
       }
-      imageView = viewImage;
+      chatEls().forEach((el) => el.classList.toggle('llm-nav-hide', !!tool));
+      activeTool = tool;
     }
 
     function activate(t, btn) {
@@ -105,13 +126,13 @@
       btn.classList.add('on');
       if (t.mode) {
         // 对话模块：确保回到对话视图，再复用原 mode-tab 的点击逻辑
-        if (imageView) setView(false);
+        if (activeTool) setToolView(null);
         lastModeKey = t.key;
         const underlying = document.getElementById(t.mode);
         if (underlying) underlying.click();
       } else {
-        // 图像模块：切换到图像视图（imagepanel.js 监听 llm-image-view 事件）
-        setView(true);
+        // 工具模块：切换到对应工具视图
+        setToolView(t.view);
       }
     }
 
@@ -126,9 +147,9 @@
     const popTabs = document.querySelector('.settings-pop .mode-tabs');
     if (popTabs && popTabs.parentElement) popTabs.parentElement.style.display = 'none';
 
-    // 图像视图内按 Esc 返回上一个对话模块（放大预览的 Esc 由图像模块自己处理）
+    // 工具视图内按 Esc 返回上一个对话模块（放大预览的 Esc 由图像模块自己处理）
     document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || !imageView) return;
+      if (e.key !== 'Escape' || !activeTool) return;
       const lb = document.querySelector('.img-lightbox:not(.hidden)');
       if (lb) return; // 放大预览开着时先关预览
       (btns[lastModeKey] || btns.edit).click();
