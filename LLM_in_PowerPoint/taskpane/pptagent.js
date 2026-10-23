@@ -33,13 +33,14 @@
   const httpErr = (s) => '服务错误（HTTP ' + s + '）';
   const trunc = (s, n) => (String(s).length > n ? String(s).slice(0, n) + '…' : String(s));
 
-  const pptShapeApi = (() => {
+  // API 可用性只影响按钮可用，不影响视图创建（否则 topnav 隐藏聊天区后会白屏）
+  const PPT_API_OK = (() => {
     try {
       return typeof PowerPoint !== 'undefined' && PowerPoint.run &&
+        typeof Office !== 'undefined' && Office.context && Office.context.requirements &&
         Office.context.requirements.isSetSupported('PowerPointApi', '1.5');
     } catch { return false; }
   })();
-  if (!pptShapeApi) return; // 仅 PowerPoint（加载项只在本套件引用此脚本）
 
   function stepDesc(st) {
     const id = st.shapeId != null ? '#' + st.shapeId : '';
@@ -288,6 +289,13 @@
     function setStatus(text, isErr) {
       status.textContent = text || '';
       status.classList.toggle('err', !!isErr);
+    }
+
+    // API 不可用（旧版 Office）时给出明确提示，而不是静默消失（否则 topnav 切过来会白屏）
+    if (!PPT_API_OK) {
+      setStatus('当前 Office 版本不支持所需的 PowerPoint API（需 1.5+），请升级 Office 后使用智能排版', true);
+      readBtn.disabled = true;
+      planBtn.disabled = true;
     }
 
     function renderSteps(statePer) {

@@ -107,15 +107,23 @@
     let activeTool = null;    // null = 对话视图；'image' | 'excel' | 'agent' = 工具视图
 
     function setToolView(tool) {
-      // 所有工具视图先按目标归位（互斥），再触发回调
+      // 所有工具视图先按目标归位（互斥），再触发回调。
+      // 防御：目标视图元素不存在（对应模块没加载/初始化失败）时不隐藏聊天区，
+      // 否则会出现"点了 tab 主体空白"——此时保持对话视图并提示。
+      let targetMissing = false;
       for (const [k, cfg] of Object.entries(TOOL_VIEWS)) {
         const el = document.querySelector(cfg.sel);
-        if (!el) continue;
+        if (!el) { if (k === tool) targetMissing = true; continue; }
         const showing = k === tool;
         const wasHidden = el.classList.contains('hidden');
         el.classList.toggle('hidden', !showing);
         if (showing) { if (cfg.onShow) cfg.onShow(); }
         else if (!wasHidden) { if (cfg.onHide) cfg.onHide(); }
+      }
+      if (targetMissing) {
+        console.warn('[llm-nav] tool view missing:', tool);
+        activeTool = null;
+        return;
       }
       chatEls().forEach((el) => el.classList.toggle('llm-nav-hide', !!tool));
       activeTool = tool;
@@ -131,8 +139,9 @@
         const underlying = document.getElementById(t.mode);
         if (underlying) underlying.click();
       } else {
-        // 工具模块：切换到对应工具视图
+        // 工具模块：切换到对应工具视图（视图缺失时 setToolView 保持对话视图，此处回退按钮高亮）
         setToolView(t.view);
+        if (!activeTool) (btns[lastModeKey] || btns.edit).classList.add('on');
       }
     }
 
