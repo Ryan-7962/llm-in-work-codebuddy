@@ -21,11 +21,11 @@ import { runModel } from './cli.js';
 import { buildPrompt, buildTurnPrompt } from './prompt.js';
 import { getModels } from './models.js';
 import { getHealth } from './health.js';
-import { generateImage, listEngines, matting, enhancePrompt } from './imagegen.js';
+import { generateImage, listEngines, matting, enhancePrompt, editImage } from './imagegen.js';
 import { formulaGen, batchFill, cleanSuggest } from './exceltools.js';
 import { classifyError } from './process.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const activeRequests = new Set();
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url))); // 项目根目录
 
@@ -302,13 +302,39 @@ async function handleExcelTool(req, res, fn) {
   }
 }
 
+// ---- /api/image/edit：图生图修图，默认混元，即梦备选 ----
+async function handleImageEdit(req, res) {
+  let payload;
+  try {
+    payload = JSON.parse(await readBody(req, 8 * 1024 * 1024));
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, error: '请求解析失败（图片可能过大）' }));
+    return;
+  }
+  try {
+    const r = await editImage({ imageB64: payload?.imageB64, prompt: payload?.prompt, count: payload?.count, engine: payload?.engine });
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, images: r.images, usage: r.usage }));
+  } catch (e) {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }));
+  }
+}
+
 // ---- 路由 ----
 async function handler(req, res) {
   const u = new URL(req.url, 'http://x');
   const p = u.pathname;
   const origin = req.headers.origin;
-  const expectedOrigin = `${tlsOpts ? 'https' : 'http'}://${req.headers.host}`;
-  if ((origin && origin !== expectedOrigin) || ((p === '/api/chat' || p === '/api/image' || p === '/api/image/prompt' || p === '/api/image/matting' || p === '/api/excel/formula' || p === '/api/excel/batchfill' || p === '/api/excel/clean') && !/^application\/json(?:;|$)/i.test(req.headers['content-type'] || ''))) {
+  // DNS rebinding 防护：Host 只接受本机回环地址
+  const host = String(req.headers.host || '').toLowerCase();
+  const actualPort = server.address()?.port || PORT; // 测试/调试可用 PORT=0，必须按实际监听端口校验
+  if (host !== `127.0.0.1:${actualPort}` && host !== `localhost:${actualPort}` && host !== `[::1]:${actualPort}`) {
+    res.writeHead(403); res.end('Forbidden'); return;
+  }
+  const expectedOrigin = `${tlsOpts ? 'https' : 'http'}://${host}`;
+  if ((origin && origin !== expectedOrigin) || ((p === '/api/chat' || p === '/api/image' || p === '/api/image/prompt' || p === '/api/image/matting' || p === '/api/image/edit' || p === '/api/excel/formula' || p === '/api/excel/batchfill' || p === '/api/excel/clean') && !/^application\/json(?:;|$)/i.test(req.headers['content-type'] || ''))) {
     res.writeHead(403); res.end('Forbidden'); return;
   }
   try {
@@ -345,6 +371,8 @@ async function handler(req, res) {
       await handleImagePrompt(req, res);
     } else if (p === '/api/image/matting' && req.method === 'POST') {
       await handleImageMatting(req, res);
+    } else if (p === '/api/image/edit' && req.method === 'POST') {
+      await handleImageEdit(req, res);
     } else if (p === '/api/excel/formula' && req.method === 'POST') {
       await handleExcelTool(req, res, formulaGen);
     } else if (p === '/api/excel/batchfill' && req.method === 'POST') {

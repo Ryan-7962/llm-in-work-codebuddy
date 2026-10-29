@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
+import { request as httpRequest } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,6 +99,13 @@ test('invalid payload and foreign origin cannot start a CLI', async () => {
     assert.equal((await fetch(base + '/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).status, 400);
   }
   assert.equal((await fetch(base + '/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://foreign.example' }, body: '{}' })).status, 403);
+  const forgedHostStatus = await new Promise((resolve, reject) => {
+    const req = httpRequest(base + '/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Host: 'foreign.example' } }, (res) => {
+      res.resume(); res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject); req.end('{}');
+  });
+  assert.equal(forgedHostStatus, 403);
 });
 
 test('Claude catalogs without resolved IDs fall back to explicit automatic aliases', () => {

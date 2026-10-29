@@ -2,7 +2,7 @@
 
 把本机已登录的 **WorkBuddy / CodeBuddy CLI** 接入日常工作流：
 **Word、PowerPoint、Excel、Overleaf（Chrome）、PDF 论文阅读（Chrome）** 五个助手，
-外加 **AI 生图（文生图 / 上下文配图）与抠图（去背景）**。
+外加 **AI 生图（文生图 / 上下文配图）、AI 修图（文字 brief 图生图）与抠图（去背景）**。
 
 基于 [ZJU-OmniAI/LLM_in_Work](https://github.com/ZJU-OmniAI/LLM_in_Work)（MIT）改造：
 Claude Code 后端槽位替换为 CodeBuddy CLI（GLM-5.3 / Kimi / DeepSeek 等模型，走 WorkBuddy 账号）。
@@ -19,6 +19,7 @@ Claude Code 后端槽位替换为 CodeBuddy CLI（GLM-5.3 / Kimi / DeepSeek 等�
 | 插图（上下文配图） | 选中文字 → AI 生成六要素中文画面描述（120–200 字，可直接修改）→ 出图 |
 | 多候选出图 | 一次 1–3 张候选（默认 2 张），点选满意的一张插入，减少整段重来 |
 | 插入尺寸受控 | PPT 中插图自动等比缩放并居中，不会超出幻灯片 |
+| **AI 修图** | 选中图片或粘贴/上传 → 用文字描述修改（换背景、去文字等）→ 预览候选 → 替换原图或插入新图；**默认混元，无需即梦 CLI** |
 | 抠图 | **PPT：选中幻灯片图片后自动载入**；完成后可**替换原图**（保位置保尺寸）或插入为新图 |
 | 生成历史 | 会话内保留最近 6 张生成记录，缩略图点击载入 |
 | **智能排版（PPT）** | 读当前页形状 → 一句话指令 → AI 出修改计划（改文本/字体/字号/加粗/颜色/填充/加文本框/删形状）→ 勾选确认 → 逐步执行，每步反馈，可一键撤销 |
@@ -51,6 +52,7 @@ Claude Code 后端槽位替换为 CodeBuddy CLI（GLM-5.3 / Kimi / DeepSeek 等�
 
 - `jimeng.env` 可强制指定代理（服务进程读不到你 shell 的代理时用）；不配则自动探测系统代理
 - `custom[].apiKey` 也可换成 `"apiKeyEnv": "MY_KEY"` 引用环境变量，避免明文
+- 如在 `image-engines.json` 中直接填写明文 key，建议执行 `chmod 600 ~/.codebuddy/image-engines.json`（Windows 保持该文件仅当前用户可读）
 - Windows 下即梦 CLI 路径用 `jimeng.bin` 指定
 
 ## 获取 CodeBuddy API key（ck_ 开头）
@@ -69,7 +71,7 @@ key 只写在自己电脑的 `~/.codebuddy/api.key`（Windows: `%USERPROFILE%\.c
 git clone https://github.com/Ryan-7962/llm-in-work-codebuddy.git
 cd llm-in-work-codebuddy
 
-# 1) 写入自己的 CodeBuddy API key（获取路径见上方；生图/抠图需要，聊天不需要）
+# 1) 写入自己的 CodeBuddy API key（获取路径见上方；生图/修图/抠图需要，聊天不需要）
 mkdir -p ~/.codebuddy && echo "ck_你的key" > ~/.codebuddy/api.key && chmod 600 ~/.codebuddy/api.key
 
 # 2) 部署 CLI 适配层（跨平台 wrapper：macOS 优先用 WorkBuddy 内嵌 CLI，也支持独立版 CLI）
@@ -89,7 +91,7 @@ cd ../LLM_in_Excel   && LLM_IN_EXCEL_CLAUDE_BIN=~/.local/bin/cbc-claude.js ./ins
 
 前置：Node.js 22.12+ 或 24+、Office 2016/365 桌面版、**独立版 CodeBuddy CLI**（官方产品：
 `irm https://copilot.tencent.com/cli/install.ps1 | iex`，装完运行一次 `codebuddy` 完成登录；
-Windows 版 WorkBuddy 不自带 CLI，无需安装 WorkBuddy）。生图/抠图另需 API key（获取路径见上文）。
+Windows 版 WorkBuddy 不自带 CLI，无需安装 WorkBuddy）。生图/修图/抠图另需 API key（获取路径见上文）。
 
 **方式一（推荐）：让 AI 代跑** —— 打开 [`_windows/AI-INSTALL-PROMPT.md`](_windows/AI-INSTALL-PROMPT.md)，
 把提示词整段发给 Windows 电脑上的 AI 助手，按引导完成。
@@ -132,6 +134,7 @@ _windows/             跨平台适配层 + Windows 环境准备
 - **切换生图引擎**：「图像」→ 插图页「引擎」下拉（检测到即梦 CLI 或自定义引擎时出现）→ 选即梦/自定义 → 生成（注意计费口径不同）
 - **智能排版（PPT）**：「智能」→ 读取当前页 → 一句话描述想要的修改 → AI 出计划 → 勾选步骤 → 执行；不满意点「撤销全部」
 - **表格三件套（Excel）**：「表格」→ 公式/填充/清洗三个 tab；写入后后悔点右上角「↩︎ 撤销上次写入」
+- **修图**：PPT 选中图片（Word/Excel 可粘贴或上传）→「图像」→「修图」→ 输入修改要求（例如换背景、去文字）→「开始修图」→ 预览后替换原图或插入新图；默认混元
 - **抠图（PPT）**：选中幻灯片里的图片 → 点顶部「图像」→ 自动切到抠图页并载入 →「开始抠图」→「替换原图」（保位置保尺寸）或「插入为新图」
 - **抠图（Word/Excel）**：复制图片 → 「图像」→ 抠图页 ⌘V 粘贴（或「从剪贴板读取」）→「开始抠图」→ 插入
 - **模型**：面板右上角「设置」→ 后端 CodeBuddy (WorkBuddy) → glm-5.3 / glm-5.3-flash 等

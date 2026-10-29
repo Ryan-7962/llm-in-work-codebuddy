@@ -1,4 +1,4 @@
-// AI 图像模块（CodeBuddy · WorkBuddy）：文生图 + 上下文配图 + 抠图。
+// AI 图像模块（CodeBuddy · WorkBuddy）：文生图 + 上下文配图 + AI 修图 + 抠图。
 // v3：从弹窗升级为一级视图（由 topnav.js 的「图像」tab 驱动，监听 llm-image-view 事件）。
 // v4（2026-10-23）：多生图引擎——默认混元（hy），检测到即梦 CLI 或自定义引擎时出现下拉切换。
 // - 插图：读选中文字 → AI 生成中文画面描述（六要素、120–200 字，可修改）→ 风格 chips →
@@ -28,7 +28,7 @@
   const EST_CREDIT = 5.7;
   const T = {
     title: 'AI 图像工具',
-    tabGen: '🖼 插图', tabMat: '✂ 抠图',
+    tabGen: '🖼 插图', tabEdit: '✨ 修图', tabMat: '✂ 抠图',
     // 插图
     fromSel: '✨ 为选中内容配图', readingSel: '读取选中内容…',
     noSel: '没有读到选中的文字，请先在幻灯片/文档里选中一段内容再试',
@@ -61,6 +61,15 @@
     matNeed: '请先提供原图（选中图片 / 粘贴 / 上传）',
     matDone: '抠图完成（背景已移除，透明 PNG）', matCost: '每次约消耗 5.7 点额度',
     matHint: '抠图会移除背景、保留主体，输出透明背景 PNG。「替换原图」会保留原位置与尺寸。',
+    // 修图
+    editPromptLabel: '修改描述（用文字 brief 告诉 AI 怎么改）',
+    editPromptPh: '例如：把背景换成海边，保留人物和主体不变，光线自然，整体写实摄影风格…',
+    editBtn: '开始修图', editing: '修图中…（约 15–60 秒）', editDone: '修图完成',
+    editNeedPrompt: '请先描述想要的修改，例如「把背景换成海边，主体保持不变」',
+    editHint: '默认使用混元修图；即梦仅在检测到 CLI 时可选。建议明确写出「要改什么」和「哪些保持不变」。',
+    editAutoLoaded: '✓ 已载入选中的图片，填写修改描述后即可开始修图',
+    editCostHy: '混元修图按 CodeBuddy 账户额度计费；先生成预览，确认后再替换或插入。',
+    editCostJimeng: '即梦修图按即梦积分计费；使用独立的「LLM_in_Work 修图」画布。',
     replace: '替换原图', replaced: '已替换原图 ✓', replaceNeed: '替换原图需要先在幻灯片中选中那个图片形状',
     replaceUnavail: '「替换原图」仅 PowerPoint 支持',
     imgTooBig: '图片过大（上限 4MB），请压缩后再试',
@@ -123,19 +132,20 @@
           shapes.load('items/id,items/type');
           await ctx.sync();
           if (!shapes.items.length) { reject(new Error(T.noShape)); return; }
-          const target = shapes.items.find((s) => s.type === 'Image') || shapes.items[0];
+          const target = shapes.items.find((s) => s.type === 'Image');
+          if (!target) { reject(new Error(T.noShape)); return; }
           const img = target.getImageAsBase64();
           await ctx.sync();
           const b64 = img.value || '';
           if (!b64) { reject(new Error(T.noShape)); return; }
-          resolve({ b64: b64.replace(/^data:image\/[a-z+]+;base64,/, ''), mime: 'image/png' });
+          resolve({ b64: b64.replace(/^data:image\/[a-z+]+;base64,/, ''), mime: 'image/png', shapeId: target.id });
         } catch (e) { reject(e); }
       }).catch(reject);
     });
   }
 
   // ---- PPT：用抠图结果替换选中的图片形状（保位置保尺寸，1.5+） ----
-  function replaceSelectedImageShape(b64) {
+  function replaceSelectedImageShape(b64, expectedShapeId) {
     return new Promise((resolve, reject) => {
       if (!pptSlideApi) { reject(new Error(T.replaceUnavail)); return; }
       PowerPoint.run(async (ctx) => {
@@ -144,13 +154,16 @@
           shapes.load('items/id,items/type');
           await ctx.sync();
           if (!shapes.items.length) { reject(new Error(T.replaceNeed)); return; }
-          const target = shapes.items.find((s) => s.type === 'Image') || shapes.items[0];
-          target.load('left, top, width, height');
+          const target = shapes.items.find((s) => s.type === 'Image');
+          if (!target || (expectedShapeId && target.id !== expectedShapeId)) { reject(new Error(T.replaceNeed)); return; }
+          target.load('left, top, width, height, rotation, name');
           const slide = target.getParentSlide();
           await ctx.sync();
           const pic = slide.shapes.addImage(b64);
           pic.left = target.left; pic.top = target.top;
           pic.width = target.width; pic.height = target.height;
+          pic.rotation = target.rotation;
+          if (target.name) pic.name = target.name;
           target.delete();
           await ctx.sync();
           resolve();
@@ -171,7 +184,13 @@
           const slide = sel.items && sel.items[0];
           if (!slide) { reject(new Error(T.noSlide)); return; }
           let sw = 960, sh = 540; // 16:9 默认值兜底
-          try { slide.load('width, height'); await ctx.sync(); if (slide.width > 0) { sw = slide.width; sh = slide.height; } } catch {}
+          // Slide 没有 width/height 属性（load 会抛 0x80070057）；
+          // 真实画布尺寸在 presentation.pageWidth/pageHeight，读不到再用默认值
+          try {
+            ctx.presentation.load('pageWidth,pageHeight');
+            await ctx.sync();
+            if (ctx.presentation.pageWidth > 0) { sw = ctx.presentation.pageWidth; sh = ctx.presentation.pageHeight; }
+          } catch {}
           const pic = slide.shapes.addImage(b64);
           const px = pngSize(b64);
           const ratio = px ? px.h / px.w : 0.5625;
@@ -261,6 +280,7 @@
     panel.innerHTML =
       '<div class="img-vhead"><b>' + esc(T.title) + '</b><span class="img-tabs">' +
       '<button id="img-tab-gen" class="img-tab on" type="button">' + esc(T.tabGen) + '</button>' +
+      '<button id="img-tab-edit" class="img-tab" type="button">' + esc(T.tabEdit) + '</button>' +
       '<button id="img-tab-mat" class="img-tab" type="button">' + esc(T.tabMat) + '</button>' +
       '</span></div>' +
       '<div class="img-vbody">' +
@@ -303,7 +323,23 @@
       '<div class="img-actions">' +
       '<button id="img-mat-replace" class="btn btn-primary hidden" type="button">' + esc(T.replace) + '</button>' +
       '<button id="img-mat-insert" class="btn hidden" type="button">插入为新图</button>' +
-      '</div></div></div>';
+      '</div></div>' +
+      // ---- 修图页（与抠图共享原图，避免重复读取/上传） ----
+      '<div id="img-page-edit" class="hidden">' +
+      '<div class="img-row"><button id="img-edit-clip" class="btn" type="button">' + esc(T.clipRead) + '</button><button id="img-edit-fromshape" class="btn" type="button">' + esc(T.reRead) + '</button></div>' +
+      '<div id="img-edit-drop" class="img-drop">' + esc(T.pasteHint) + ' <button id="img-edit-pick" class="btn" type="button" style="padding:2px 10px;font-size:12px;">' + esc(T.pickFile) + '</button><input id="img-edit-file" type="file" accept="image/*" class="hidden"></div>' +
+      '<div id="img-edit-src" class="img-src"></div>' +
+      '<label class="field"><span class="flabel">' + esc(T.editPromptLabel) + '</span><textarea id="img-edit-prompt" rows="4" placeholder="' + esc(T.editPromptPh) + '"></textarea></label>' +
+      '<div class="img-row" style="gap:14px;">' +
+      '<label class="flabel" id="img-edit-engine-wrap" style="display:none;">' + esc(T.engineLabel) + ' <select id="img-edit-engine"></select></label>' +
+      '<label class="flabel">' + esc(T.countLabel) + ' <select id="img-edit-count"><option value="1" selected>1 张</option><option value="2">2 张</option><option value="3">3 张</option></select></label>' +
+      '<span class="flabel mini" id="img-edit-cost"></span></div>' +
+      '<p class="img-note" id="img-edit-note">' + esc(T.editCostHy) + ' ' + esc(T.editHint) + '</p>' +
+      '<button id="img-edit" class="btn btn-primary" type="button" style="width:100%;">' + esc(T.editBtn) + '</button>' +
+      '<div id="img-edit-status" class="img-status" role="status"></div>' +
+      '<div id="img-edit-preview" class="img-preview"></div>' +
+      '<div class="img-actions"><button id="img-edit-replace" class="btn btn-primary hidden" type="button">' + esc(T.replace) + '</button><button id="img-edit-insert" class="btn hidden" type="button">插入为新图</button></div>' +
+      '</div></div>';
 
     const messages = document.getElementById('messages');
     if (messages) messages.insertAdjacentElement('beforebegin', panel);
@@ -341,8 +377,8 @@
     const panel = buildUI();
     if (!panel) return;
     const $ = (id) => document.getElementById(id);
-    const tabGen = $('img-tab-gen'), tabMat = $('img-tab-mat');
-    const pageGen = $('img-page-gen'), pageMat = $('img-page-mat');
+    const tabGen = $('img-tab-gen'), tabEdit = $('img-tab-edit'), tabMat = $('img-tab-mat');
+    const pageGen = $('img-page-gen'), pageEdit = $('img-page-edit'), pageMat = $('img-page-mat');
     const promptEl = $('img-prompt'), sizeEl = $('img-size'), countEl = $('img-count'), costEl = $('img-cost');
     const engineWrap = $('img-engine-wrap'), engineSel = $('img-engine');
     const costNote = panel.querySelector('.img-note'); // 引擎说明（首段）
@@ -351,18 +387,25 @@
     const clipBtn = $('img-clip'), fromShape = $('img-fromshape'), drop = $('img-drop'), pick = $('img-pick'), fileInput = $('img-file');
     const srcBox = $('img-src'), matBtn = $('img-mat'), matStatus = $('img-mat-status'), matPreview = $('img-mat-preview');
     const matReplace = $('img-mat-replace'), matInsert = $('img-mat-insert');
+    const editClip = $('img-edit-clip'), editFromShape = $('img-edit-fromshape'), editDrop = $('img-edit-drop');
+    const editPick = $('img-edit-pick'), editFile = $('img-edit-file'), editSrcBox = $('img-edit-src');
+    const editPrompt = $('img-edit-prompt'), editCount = $('img-edit-count'), editCost = $('img-edit-cost');
+    const editEngineWrap = $('img-edit-engine-wrap'), editEngineSel = $('img-edit-engine'), editNote = $('img-edit-note');
+    const editBtn = $('img-edit'), editStatus = $('img-edit-status'), editPreview = $('img-edit-preview');
+    const editReplace = $('img-edit-replace'), editInsert = $('img-edit-insert');
     const histWrap = $('img-hist-wrap'), histStrip = $('img-hist');
     const host = detectHost();
     let candidates = [];         // 本轮候选 [{ b64, mime }]
     let selectedIdx = -1;       // 选中的候选
     let lastSelText = '';       // 最近一次读取的选中内容
     let curStyle = '';          // 当前风格
-    let matSource = null, matResult = null;
+    let matSource = null, matResult = null; // 原图由抠图与修图共享
+    let editResults = [], editSelectedIdx = -1, editCurEngine = 'hy';
     const history = [];         // 会话内生成历史 [{ b64, mime }]
     let curEngine = 'hy';       // 当前生图引擎（hy / jimeng / custom:*）
     let enginesLoaded = false;
 
-    if (host !== 'ppt') fromShape.classList.add('hidden'); // 读取选中图片仅 PPT
+    if (host !== 'ppt') { fromShape.classList.add('hidden'); editFromShape.classList.add('hidden'); } // 读取选中图片仅 PPT
 
     // ---- 引擎列表：GET api/image/engines，多于 1 个可选时才显示下拉 ----
     async function loadEngines() {
@@ -380,7 +423,10 @@
       // 只有混元一个可用引擎时隐藏下拉，保持界面干净
       if (selectable.length <= 1 && engines.every((e) => e.id === 'hy')) {
         engineWrap.style.display = 'none';
+        editEngineWrap.style.display = 'none';
+        editCurEngine = 'hy';
         enginesLoaded = true;
+        updateEditEngineNote();
         return;
       }
       engineWrap.style.display = '';
@@ -391,8 +437,17 @@
       // 默认选混元；不可用时选第一个可用引擎
       const def = engines.find((e) => e.id === 'hy' && e.available) || selectable[0];
       if (def) { engineSel.value = def.id; curEngine = def.id; }
+      // 修图只开放混元和即梦；自定义文生图 API 不一定支持图生图。
+      const editEngines = engines.filter((e) => e.id === 'hy' || e.id === 'jimeng');
+      const editSelectable = editEngines.filter((e) => e.available);
+      editEngineWrap.style.display = editSelectable.length > 1 ? '' : 'none';
+      editEngineSel.innerHTML = editEngines.map((e) =>
+        '<option value="' + esc(e.id) + '"' + (e.available ? '' : ' disabled') + '>' + esc(e.name || e.id) + (e.available ? '' : '（不可用）') + '</option>').join('');
+      const editDef = editEngines.find((e) => e.id === 'hy' && e.available) || editSelectable[0];
+      if (editDef) { editEngineSel.value = editDef.id; editCurEngine = editDef.id; }
       enginesLoaded = true;
       updateEngineNote();
+      updateEditEngineNote();
     }
     function updateEngineNote() {
       const n = Number(countEl.value) || 1;
@@ -407,8 +462,21 @@
         costNote.textContent = T.engineNoteHy;
       }
     }
+    function updateEditEngineNote() {
+      const n = Number(editCount.value) || 1;
+      if (editCurEngine === 'jimeng') {
+        editCost.textContent = '按即梦积分计费';
+        editNote.textContent = T.editCostJimeng + ' ' + T.editHint;
+      } else {
+        editCost.textContent = '约 ' + (n * EST_CREDIT).toFixed(1) + ' 点/次';
+        editNote.textContent = T.editCostHy + ' ' + T.editHint;
+      }
+    }
     engineSel.addEventListener('change', () => { curEngine = engineSel.value; updateEngineNote(); });
+    editEngineSel.addEventListener('change', () => { editCurEngine = editEngineSel.value; updateEditEngineNote(); });
+    editCount.addEventListener('change', updateEditEngineNote);
     loadEngines();
+    updateEditEngineNote();
 
     function setStatus(el, text, isErr) {
       el.textContent = text || '';
@@ -421,13 +489,15 @@
     updateEngineNote();
 
     // tab 切换
-    function switchTab(mat) {
-      tabGen.classList.toggle('on', !mat);
-      tabMat.classList.toggle('on', mat);
-      pageGen.classList.toggle('hidden', mat);
-      pageMat.classList.toggle('hidden', !mat);
+    function switchTab(name) {
+      tabGen.classList.toggle('on', name === 'gen');
+      tabEdit.classList.toggle('on', name === 'edit');
+      tabMat.classList.toggle('on', name === 'mat');
+      pageGen.classList.toggle('hidden', name !== 'gen');
+      pageEdit.classList.toggle('hidden', name !== 'edit');
+      pageMat.classList.toggle('hidden', name !== 'mat');
     }
-    tabGen.addEventListener('click', () => switchTab(false));
+    tabGen.addEventListener('click', () => switchTab('gen'));
 
     // 视图显隐由 topnav.js 驱动（llm-image-view 事件）
     document.addEventListener('llm-image-view', (e) => {
@@ -435,13 +505,13 @@
       if (e.detail?.show) {
         loadEngines(); // 重新拉一次，即梦登录态/自定义配置可能刚变化
         if (host === 'ppt') {
-          autoDetect(true).then((ok) => { if (ok) { switchTab(true); setStatus(matStatus, T.autoLoaded); } });
+          autoDetect(true).then((ok) => { if (ok) { switchTab('mat'); setStatus(matStatus, T.autoLoaded); } });
         }
       }
     });
 
     // 图片点击放大（委托）
-    [preview, matPreview, srcBox].forEach((box) => {
+    [preview, matPreview, srcBox, editPreview, editSrcBox].forEach((box) => {
       box.addEventListener('click', (e) => {
         if (e.target && e.target.tagName === 'IMG' && !e.target.closest('.cand')) panel._zoom(e.target.src);
       });
@@ -504,8 +574,15 @@
       matPreview.innerHTML = '';
       matReplace.classList.add('hidden');
       matInsert.classList.add('hidden');
-      srcBox.innerHTML = '<img src="data:' + esc(img.mime) + ';base64,' + img.b64 + '" alt="source" title="' + esc(T.clickZoom) + '">';
+      editResults = []; editSelectedIdx = -1;
+      editPreview.innerHTML = '';
+      editReplace.classList.add('hidden');
+      editInsert.classList.add('hidden');
+      const srcHtml = '<img src="data:' + esc(img.mime) + ';base64,' + img.b64 + '" alt="source" title="' + esc(T.clickZoom) + '">';
+      srcBox.innerHTML = srcHtml;
+      editSrcBox.innerHTML = srcHtml;
       setStatus(matStatus, '');
+      setStatus(editStatus, '');
       return true;
     }
 
@@ -529,10 +606,26 @@
 
     // 切到抠图页：无图时自动探测一次
     tabMat.addEventListener('click', () => {
-      switchTab(true);
+      switchTab('mat');
       if (matSource) return;
       if (host === 'ppt') autoDetect(false);
       else setStatus(matStatus, T.hostUnavail);
+    });
+
+    // 切到修图页：复用已读原图；没有时自动读取 PPT 选中图片
+    tabEdit.addEventListener('click', async () => {
+      switchTab('edit');
+      if (matSource) { setStatus(editStatus, T.editAutoLoaded); return; }
+      if (host !== 'ppt') { setStatus(editStatus, T.hostUnavail); return; }
+      if (detecting) return;
+      detecting = true;
+      setStatus(editStatus, T.readingShape);
+      try {
+        const img = await readSelectedImageShape();
+        if (setMatSource(img)) setStatus(editStatus, T.editAutoLoaded);
+      } catch {
+        setStatus(editStatus, T.autoNone);
+      } finally { detecting = false; }
     });
 
     // 手动重读选中图片（仅 PPT）
@@ -547,6 +640,17 @@
       } finally {
         fromShape.disabled = false;
       }
+    });
+
+    editFromShape.addEventListener('click', async () => {
+      editFromShape.disabled = true;
+      setStatus(editStatus, T.readingShape);
+      try {
+        const img = await readSelectedImageShape();
+        if (setMatSource(img)) setStatus(editStatus, T.editAutoLoaded);
+      } catch (e) {
+        setStatus(editStatus, (e && e.message) ? e.message : String(e), true);
+      } finally { editFromShape.disabled = false; }
     });
 
     // 从剪贴板读取
@@ -570,7 +674,26 @@
       }
     });
 
+    editClip.addEventListener('click', async () => {
+      editClip.disabled = true;
+      setStatus(editStatus, T.clipReading);
+      try {
+        if (!navigator.clipboard || !navigator.clipboard.read) throw new Error(T.clipFail);
+        const items = await navigator.clipboard.read();
+        let blob = null;
+        for (const it of items) {
+          const type = (it.types || []).find((t) => t.startsWith('image/'));
+          if (type) { blob = await it.getType(type); break; }
+        }
+        if (!blob) throw new Error(T.clipFail);
+        if (setMatSource(await blobToB64(blob))) setStatus(editStatus, T.clipOk);
+      } catch (e) {
+        setStatus(editStatus, (e && e.message) ? e.message : String(e), true);
+      } finally { editClip.disabled = false; }
+    });
+
     pick.addEventListener('click', () => fileInput.click());
+    editPick.addEventListener('click', () => editFile.click());
     fileInput.addEventListener('change', async () => {
       const f = fileInput.files && fileInput.files[0];
       if (!f) return;
@@ -578,9 +701,18 @@
       fileInput.value = '';
     });
 
-    // 粘贴：document 级监听，抠图页激活时生效
+    editFile.addEventListener('change', async () => {
+      const f = editFile.files && editFile.files[0];
+      if (!f) return;
+      try { setMatSource(await blobToB64(f)); } catch (e) { setStatus(editStatus, (e && e.message) ? e.message : String(e), true); }
+      editFile.value = '';
+    });
+
+    // 粘贴：document 级监听，抠图或修图页激活时生效
     document.addEventListener('paste', async (e) => {
-      if (panel.classList.contains('hidden') || pageMat.classList.contains('hidden')) return;
+      const inEdit = !pageEdit.classList.contains('hidden');
+      const inMat = !pageMat.classList.contains('hidden');
+      if (panel.classList.contains('hidden') || (!inEdit && !inMat)) return;
       const items = e.clipboardData && e.clipboardData.items;
       if (!items) return;
       for (const it of items) {
@@ -589,21 +721,26 @@
           const f = it.getAsFile();
           if (!f) return;
           try {
-            if (setMatSource(await blobToB64(f))) setStatus(matStatus, T.pasted);
-          } catch (err) { setStatus(matStatus, (err && err.message) ? err.message : String(err), true); }
+            if (setMatSource(await blobToB64(f))) setStatus(inEdit ? editStatus : matStatus, T.pasted);
+          } catch (err) { setStatus(inEdit ? editStatus : matStatus, (err && err.message) ? err.message : String(err), true); }
           return;
         }
       }
     });
 
-    // 拖拽
-    ['dragover', 'dragenter'].forEach((ev) => panel.addEventListener(ev, (e) => { e.preventDefault(); if (!pageMat.classList.contains('hidden')) drop.classList.add('on'); }));
-    ['dragleave', 'drop'].forEach((ev) => panel.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('on'); }));
+    // 拖拽：根据当前页写入对应原图区（抠图与修图共享）
+    const activeDrop = () => !pageEdit.classList.contains('hidden') ? editDrop : drop;
+    ['dragover', 'dragenter'].forEach((ev) => panel.addEventListener(ev, (e) => {
+      e.preventDefault();
+      if (!pageMat.classList.contains('hidden') || !pageEdit.classList.contains('hidden')) activeDrop().classList.add('on');
+    }));
+    ['dragleave', 'drop'].forEach((ev) => panel.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('on'); editDrop.classList.remove('on'); }));
     panel.addEventListener('drop', async (e) => {
-      if (pageMat.classList.contains('hidden')) return;
+      const inEdit = !pageEdit.classList.contains('hidden');
+      if (!inEdit && pageMat.classList.contains('hidden')) return;
       const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
       if (!f || !f.type.startsWith('image/')) return;
-      try { setMatSource(await blobToB64(f)); } catch (err) { setStatus(matStatus, (err && err.message) ? err.message : String(err), true); }
+      try { setMatSource(await blobToB64(f)); } catch (err) { setStatus(inEdit ? editStatus : matStatus, (err && err.message) ? err.message : String(err), true); }
     });
 
     // ---- 插图：为选中内容配图（AI 生成中文画面描述） ----
@@ -671,6 +808,54 @@
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doGenerate(); }
     });
 
+    // ---- 修图：候选渲染、点选与执行 ----
+    function renderEditResults(imgs) {
+      editResults = imgs;
+      editSelectedIdx = imgs.length ? 0 : -1;
+      editPreview.innerHTML = imgs.length
+        ? '<div class="img-cands' + (imgs.length === 1 ? ' c1' : '') + '">' + imgs.map((im, i) =>
+            '<div class="cand' + (i === 0 ? ' on' : '') + '" data-i="' + i + '"><span class="tag">✓ 已选</span><img src="data:' + esc(im.mime) + ';base64,' + im.b64 + '"></div>').join('') + '</div>' +
+          '<p class="img-note" style="text-align:center;">' + esc(T.pickCandidate) + '</p>'
+        : '';
+    }
+    editPreview.addEventListener('click', (e) => {
+      const cand = e.target.closest('.cand');
+      if (!cand) return;
+      editSelectedIdx = Number(cand.dataset.i);
+      editPreview.querySelectorAll('.cand').forEach((c) => c.classList.toggle('on', c === cand));
+    });
+
+    async function doEdit() {
+      const prompt = editPrompt.value.trim();
+      if (!matSource) { setStatus(editStatus, T.matNeed, true); return; }
+      if (!prompt) { setStatus(editStatus, T.editNeedPrompt, true); editPrompt.focus(); return; }
+      const source = matSource;
+      editBtn.disabled = true;
+      editReplace.classList.add('hidden'); editInsert.classList.add('hidden');
+      editPreview.innerHTML = ''; editResults = []; editSelectedIdx = -1;
+      setStatus(editStatus, T.editing);
+      try {
+        const resp = await fetch('api/image/edit', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageB64: source.b64, prompt, count: Number(editCount.value) || 1, engine: editCurEngine }),
+        });
+        const data = await resp.json().catch(() => ({ ok: false, error: httpErr(resp.status) }));
+        if (!data.ok || !Array.isArray(data.images) || !data.images.length) throw new Error(data.error || httpErr(resp.status));
+        renderEditResults(data.images);
+        const credit = data.usage && typeof data.usage.credit === 'number' ? '（消耗 ' + data.usage.credit + ' 点额度）' : '';
+        const engName = editCurEngine === 'jimeng' ? '（即梦）' : '（混元）';
+        setStatus(editStatus, '✓ ' + T.editDone + engName + credit + ' · ' + T.pickCandidate);
+        if (host === 'ppt') editReplace.classList.remove('hidden');
+        editInsert.classList.remove('hidden');
+      } catch (e) {
+        setStatus(editStatus, '修图失败：' + (e && e.message ? e.message : e), true);
+      } finally { editBtn.disabled = false; }
+    }
+    editBtn.addEventListener('click', doEdit);
+    editPrompt.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doEdit(); }
+    });
+
     // ---- 抠图：执行 ----
     matBtn.addEventListener('click', async () => {
       if (!matSource) { setStatus(matStatus, T.matNeed, true); return; }
@@ -706,13 +891,39 @@
       matReplace.disabled = true;
       setStatus(matStatus, T.inserting);
       try {
-        await replaceSelectedImageShape(matResult.b64.replace(/^data:[^,]+,/, ''));
+        await replaceSelectedImageShape(matResult.b64.replace(/^data:[^,]+,/, ''), matSource?.shapeId);
         setStatus(matStatus, T.replaced);
       } catch (e) {
         setStatus(matStatus, T.insertFailed + '：' + (e && e.message ? e.message : e), true);
       } finally {
         matReplace.disabled = false;
       }
+    });
+
+    // ---- 修图：替换原图或插入为新图 ----
+    editReplace.addEventListener('click', async () => {
+      const img = editResults[editSelectedIdx];
+      if (!img) { setStatus(editStatus, T.pickCandidate, true); return; }
+      editReplace.disabled = true;
+      setStatus(editStatus, T.inserting);
+      try {
+        await replaceSelectedImageShape(img.b64.replace(/^data:[^,]+,/, ''), matSource?.shapeId);
+        setStatus(editStatus, T.replaced);
+      } catch (e) {
+        setStatus(editStatus, T.insertFailed + '：' + (e && e.message ? e.message : e), true);
+      } finally { editReplace.disabled = false; }
+    });
+    editInsert.addEventListener('click', async () => {
+      const img = editResults[editSelectedIdx];
+      if (!img) { setStatus(editStatus, T.pickCandidate, true); return; }
+      editInsert.disabled = true;
+      setStatus(editStatus, T.inserting);
+      try {
+        await insertImage(img);
+        setStatus(editStatus, T.inserted);
+      } catch (e) {
+        setStatus(editStatus, T.insertFailed + '：' + (e && e.message ? e.message : e), true);
+      } finally { editInsert.disabled = false; }
     });
 
     // ---- 插入：插图选中候选 ----

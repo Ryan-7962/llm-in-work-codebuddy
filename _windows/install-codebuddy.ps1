@@ -1,6 +1,6 @@
 # install-codebuddy.ps1 — LLM_in_Work × CodeBuddy Windows 一次性准备脚本
 # 做四件事（全部 per-user，无需管理员）：
-#   1) 把 API key 写入 %USERPROFILE%\.codebuddy\api.key（可选，仅生图/抠图需要）
+#   1) 把 API key 写入 %USERPROFILE%\.codebuddy\api.key（可选，仅生图/修图/抠图需要）
 #   2) 部署跨平台 wrapper cbc-claude.js 到 %USERPROFILE%\.llm_in_codebuddy\
 #   3) 探测独立版 CodeBuddy CLI（官方产品；Windows 版 WorkBuddy 不带 CLI）
 #      找不到时可选：由本脚本代跑官方安装器，或提示手动安装
@@ -22,7 +22,7 @@ $Node = Get-Command node.exe -ErrorAction SilentlyContinue
 if (!$Node) { throw '未找到 Node.js。请先安装 Node.js 22.12+ 或 24+（https://nodejs.org，LTS 版即可）。' }
 Write-Host "[OK] Node.js: $($Node.Source)"
 
-# ---- 1) API key（可选：只影响生图/抠图）----
+# ---- 1) API key（可选：只影响生图/修图/抠图）----
 $KeyDir = Join-Path $env:USERPROFILE '.codebuddy'
 $KeyFile = Join-Path $KeyDir 'api.key'
 if ($ApiKey) {
@@ -31,7 +31,7 @@ if ($ApiKey) {
 }
 if (!(Test-Path $KeyFile) -or !(Get-Content $KeyFile -Raw).Trim()) {
     if (!$ApiKey) {
-        $ApiKey = Read-Host '请粘贴 CodeBuddy API key（ck_ 开头。获取路径：WorkBuddy - 个人信息 - 管理中心 - 访问密钥。直接回车=跳过：聊天不受影响，生图/抠图不可用）'
+        $ApiKey = Read-Host '请粘贴 CodeBuddy API key（ck_ 开头。获取路径：WorkBuddy - 个人信息 - 管理中心 - 访问密钥。直接回车=跳过：聊天不受影响，生图/修图/抠图不可用）'
         if ($ApiKey) {
             New-Item -ItemType Directory -Force -Path $KeyDir | Out-Null
             [IO.File]::WriteAllText($KeyFile, $ApiKey.Trim())
@@ -41,7 +41,7 @@ if (!(Test-Path $KeyFile) -or !(Get-Content $KeyFile -Raw).Trim()) {
 if ((Test-Path $KeyFile) -and (Get-Content $KeyFile -Raw).Trim()) {
     Write-Host "[OK] API key 已就位: $KeyFile"
 } else {
-    Write-Warning '未配置 API key：生图/抠图将不可用。聊天功能走 CLI 自身登录态，不受影响。'
+    Write-Warning '未配置 API key：生图/修图/抠图将不可用。聊天功能走 CLI 自身登录态，不受影响。'
 }
 
 # ---- 2) 部署 wrapper ----

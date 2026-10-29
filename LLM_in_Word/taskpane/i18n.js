@@ -2,6 +2,7 @@
 (() => {
   'use strict';
   const EN = {
+  "Auto · 自动选择": "Auto · Automatic selection",
   "Sonnet · 自动版本": "Sonnet · Auto version",
   "Opus · 自动版本": "Opus · Auto version",
   "Haiku · 自动版本": "Haiku · Auto version",

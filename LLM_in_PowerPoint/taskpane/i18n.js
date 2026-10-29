@@ -3,6 +3,7 @@
 (() => {
   'use strict';
   const EN = {
+  "Auto · 自动选择": "Auto · Automatic selection",
   "\n\n_（已停止）_": "\n\n_(Stopped)_",
   "\n…（过长已截断）": "\n… (truncated due to length)",
   " · {0} 页": " · {0} slides",

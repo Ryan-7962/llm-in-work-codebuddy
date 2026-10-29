@@ -104,6 +104,7 @@ test('catalog versions keep aliases in requests; actual response model is shown 
   const t = await setup([{ type: 'model', model: 'claude-sonnet-5-1' }, ...good]);
   try {
     await t.lx.refreshModelList(true);
+    t.lx.state.cfg.model_claude = 'sonnet'; t.lx.fillModelOptions();
     assert.equal(t.d.querySelector('#sel-model option[value="opus"]').textContent, 'Opus 4.8');
     assert.match(t.d.querySelector('#model-detail').textContent, /CLI 当前解析：claude-sonnet-5/);
     await t.lx.sendInstruction('润色');
@@ -221,7 +222,7 @@ test('settings and targets float over the conversation, like the Word and PowerP
     btn.click();
     assert.equal(pop.classList.contains('hidden'), false);
     assert.equal(btn.getAttribute('aria-expanded'), 'true');
-    assert.match(btn.title, /^Model, mode and target settings · Claude Code · .+ · (Light|Balanced|Deep)/);
+    assert.match(btn.title, /^Model, mode and target settings · CodeBuddy · WorkBuddy · .+ · (Light|Balanced|Deep)/);
     assert.match(d.querySelector('.tgt-where').textContent, /^Orders!B2:B3 · 2×1$/);
     d.querySelector('#sel-backend').dispatchEvent(new t.w.Event('pointerdown', { bubbles: true }));
     assert.equal(pop.classList.contains('hidden'), false, 'clicks inside the card keep it open');

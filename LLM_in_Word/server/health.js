@@ -13,7 +13,7 @@ async function inspect(backend, bin) {
   } else if (/not logged in/i.test(auth.stdout + auth.stderr)) loggedIn = false;
   else if (/logged in/i.test(auth.stdout + auth.stderr)) loggedIn = true;
   if (loggedIn === true && auth.code === 0) return { ...base, status: 'ready', label: '已登录', hint: 'CLI 与本机登录状态正常；实际网络连通性以生成结果为准。' };
-  if (loggedIn === false) return { ...base, status: 'auth', label: '需要登录', hint: `请在终端运行 ${backend === 'claude' ? 'claude auth login' : 'codex login'}。` };
+  if (loggedIn === false) return { ...base, status: 'auth', label: '需要登录', hint: `请在终端运行 ${backend === 'claude' ? 'codebuddy（独立版 CLI 浏览器登录）' : 'codex login'}。` };
   return { ...base, status: 'unknown', label: '登录状态待确认', hint: 'CLI 可启动，但当前版本未能返回登录状态。可以直接尝试生成。' };
 }
 let cache, pending;

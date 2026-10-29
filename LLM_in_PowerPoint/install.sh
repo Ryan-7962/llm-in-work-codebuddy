@@ -113,7 +113,11 @@ else
 fi
 
 # ---- 3) 启动垫片：把安装这一刻的代理设置和 CLI 路径烤进去（launchd 拉起的进程不带 ~/.zshrc）----
-CLAUDE_PATH="${LLM_IN_POWERPOINT_CLAUDE_BIN:-$(command -v claude || true)}"
+CLAUDE_PATH="${LLM_IN_POWERPOINT_CLAUDE_BIN:-}"
+if [ -z "$CLAUDE_PATH" ]; then
+  if [ -x "$HOME/.local/bin/cbc-claude.js" ]; then CLAUDE_PATH="$HOME/.local/bin/cbc-claude.js"
+  else CLAUDE_PATH="$(command -v claude || true)"; fi
+fi
 CODEX_PATH="${LLM_IN_POWERPOINT_CODEX_BIN:-$(command -v codex || true)}"
 # 用 printf %q 生成安全的 shell 字面量，不 eval 代理值，也不把凭证打印到日志。
 {

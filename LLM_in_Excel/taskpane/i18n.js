@@ -3,6 +3,7 @@
 (() => {
   'use strict';
   const EN = {
+  "Auto · 自动选择": "Auto · Automatic selection",
   "\n\n_（已停止）_": "\n\n_(Stopped)_",
   "\n…（过长已截断）": "\n… (truncated due to length)",
   " · <b class=\"warn\">⚠️ 单元格较多，生成会比较慢</b>": " · <b class=\"warn\">⚠️ Many cells; generation will be slower</b>",

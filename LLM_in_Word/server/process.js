@@ -71,7 +71,7 @@ export function classifyError(message) {
   } else if (/model.*(?:not found|not supported|unavailable|does not exist)|unsupported.*(?:model|effort)/i.test(text)) {
     code = 'model'; hint = '请刷新模型列表，选择默认模型或较低思考强度后重试。';
   } else if (/timeout|timed out|ETIMEDOUT|ECONN|ENOTFOUND|fetch failed|403|network|connection/i.test(text)) {
-    code = 'network'; hint = '请检查网络和代理；代理端口变化后运行 npm run update。';
+    code = 'network'; hint = '请检查网络和代理（服务启动时自动读取系统代理，确认系统代理已开启后重试）。';
   }
   return { code, error: text.slice(-1600), hint };
 }

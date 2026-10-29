@@ -87,6 +87,7 @@ test('catalog versions keep aliases in requests; actual response model is shown 
   const t = setup([{ type: 'model', model: 'claude-sonnet-5-1' }, ...good]);
   try {
     await t.w.ui.refreshModelList(true);
+    t.w.ui.state.cfg.model_claude = 'sonnet'; t.w.ui.fillModelOptions();
     assert.equal(t.w.document.querySelector('#sel-model option[value="opus"]').textContent, 'Opus 4.8');
     assert.match(t.w.document.querySelector('#model-detail').textContent, /CLI 当前解析：claude-sonnet-5/);
     await t.w.ui.sendInstruction('润色');
@@ -112,6 +113,7 @@ test('English UI covers static labels, dynamic previews, model details, and pres
     d.querySelector('#presets .chip').click();
     assert.match(t.input.value, /Polish this text/);
     await t.w.ui.refreshModelList(true);
+    t.w.ui.state.cfg.model_claude = 'sonnet'; t.w.ui.fillModelOptions();
     assert.match(d.querySelector('#model-detail').textContent, /CLI resolves to:/);
     await t.w.ui.sendInstruction('中文原始指令');
     assert.equal(t.calls[0].messages[0].content, '中文原始指令');
@@ -215,7 +217,7 @@ test('settings and targets float over the conversation, like the Overleaf panel'
     btn.click();
     assert.equal(pop.classList.contains('hidden'), false);
     assert.equal(btn.getAttribute('aria-expanded'), 'true');
-    assert.match(btn.title, /^Model, mode and target settings · Claude Code · .+ · (Light|Balanced|Deep)/);
+    assert.match(btn.title, /^Model, mode and target settings · CodeBuddy · WorkBuddy · .+ · (Light|Balanced|Deep)/);
     d.querySelector('#sel-backend').dispatchEvent(new t.w.Event('pointerdown', { bubbles: true }));
     assert.equal(pop.classList.contains('hidden'), false, 'clicks inside the card keep it open');
     d.querySelector('#messages').dispatchEvent(new t.w.Event('pointerdown', { bubbles: true }));

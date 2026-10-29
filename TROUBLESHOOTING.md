@@ -12,6 +12,8 @@
 | 面板报「无法加载该加载项」 | 本机桥服务没运行（端口 8377/8387/8397 无监听） | macOS：`launchctl print gui/$(id -u)/com.llm_in_powerpoint.server` 看状态；挂了 `pkill -f '\.llm_in_.*server\.js'` 让 launchd 自动拉起 |
 | 生图/抠图报 401/403 | `~/.codebuddy/api.key` 失效 | WorkBuddy → 个人信息 → 管理中心 → 访问密钥，重新获取并写入 |
 | 聊天能用、生图不能用 | key 未写或服务端 imagegen 路由未部署 | 检查 key 文件；`curl -k https://127.0.0.1:8387/api/image` 看路由 |
+| 修图已生成但报「图片下载失败：fetch failed」 | 产物 CDN 下载时网络/代理抖动 | 更新到最新版：Node fetch 失败后会自动用 curl 代理、直连回退，不重复生成 |
+| 对话报 400，提示只支持 `deepseek-flash / deepseek-v4-pro` | macOS `run.sh` 被旧安装脚本错误指向系统 Claude，绕过 CodeBuddy wrapper | 更新到最新版并重跑 install.sh；检查 `~/.llm_in_*/run.sh` 应指向 `~/.local/bin/cbc-claude.js` |
 
 ## 案例 A：WorkBuddy 更新导致 CLI 断联（2026-10 实战）
 
@@ -85,16 +87,35 @@ wrapper（cbc-claude.js）按上表自动探测来源并选择认证方式；`CO
 
 **症状**：图像页选即梦引擎生成，报「即梦生图失败：The service could not be reached…」；但同一台机器在终端直接跑 `dreamina-canvas node create image …` 却成功。
 
-**根因**（2026-10-23 实测）：旧版 install.sh 把**安装那一刻的代理端口快照**进 `~/.llm_in_*/run.sh`（如 `export HTTPS_PROXY=http://127.0.0.1:51200`）。launchd 拉起的服务进程不带 `~/.zshrc`，只认 run.sh 里这份快照——代理端口一变（51200 → 7897），服务进程就拿着死代理出网。即梦 CLI（Go 二进制）读代理变量必走死代理；而混元引擎不受影响（Node fetch 不读 `HTTP_PROXY`，一直直连），所以聊天/混元生图正常、唯独即梦失败，极易误判为即梦服务端故障。
+**根因**（2026-10-23 实测）：旧版 install.sh 把**安装那一刻的代理端口快照**进 `~/.llm_in_*/run.sh`（如 `export HTTPS_PROXY=http://127.0.0.1:51200`）。launchd 拉起的服务进程不带 `~/.zshrc`，只认 run.sh 里这份快照——代理端口一变（51200 → 7897），服务进程就拿着死代理出网。即梦 CLI（Go 二进制）读代理变量必走死代理；旧版混元走 Node fetch 直连所以不受影响，极易误判为即梦服务端故障。新版混元/自定义 API 也统一做代理活性探测，避免系统代理变化后连接超时。
 
 **修复**（三层，已进仓库）：
 
 1. `run.sh` / `install.sh` 模板：不再快照代理，启动时动态读 macOS 系统代理（`scutil --proxy`）
 2. `imagegen.js`：spawn 即梦 CLI 前做**代理活性探测**（TCP 连一下端口，600ms）——代理变量指向的端口没监听就自动换系统代理，系统代理也不行就清掉变量直连
 3. 错误透传：CLI 的 JSON 错误对象（在 stderr）会被解析出 `code/message`，`transport_failed` 附带代理配置指引
+4. Node 请求开启 `NODE_USE_ENV_PROXY`，每次请求前同步有效代理；图片产物下载再增加「Node fetch → curl 代理 → curl 直连」回退，避免已生成的图片因一次下载抖动丢失
 
 **手动修复存量安装**（已装用户不想重跑 install.sh）：编辑 `~/.llm_in_{word,powerpoint,excel}/run.sh`，把硬编码的 `export …_PROXY=http://127.0.0.1:旧端口` 四行删掉，替换为动态块（见 install.sh 生成的最新模板），然后 `pkill -f "llm_in_.*app/server"` 让 launchd 重拉。
 
 **验证**：`curl -k https://127.0.0.1:8387/api/image/engines` 应看到 `{"id":"jimeng","available":true}`；POST `/api/image` 带 `"engine":"jimeng"` 能出图即通。
 
 **教训**：任何「把环境快照进配置」的方案（代理端口、CLI 路径、版本号）都要考虑漂移；跨进程网络问题的第一怀疑对象应该是**环境差异**（shell vs launchd），用 `env -i` 最小环境复现是定位利器。
+
+## 案例 C：模型存在却报 400——CLI 路由被覆盖（2026-10-29 实战）
+
+**症状**：面板底部显示 `claude · deepseek-v4.1-flash`，但服务端返回 `API Error: 400`，声称只支持 `deepseek-flash / deepseek-v4-pro`；同时在其他 CLI 的历史里出现 `LLM_in_*` 会话。
+
+**根因**：旧版 macOS `install.sh` 用 `command -v claude` 重写 `run.sh`，把正确的 `~/.local/bin/cbc-claude.js` 覆盖成 `/usr/local/bin/claude`。请求没有进入 CodeBuddy，而是进了另一个后端；该后端不接受这个模型名。
+
+**修复**：最新版三个 `install.sh` 已改为：显式环境变量 > `~/.local/bin/cbc-claude.js` > 系统 Claude。存量安装重跑对应套件 `install.sh --update-only`，或把 `run.sh` 的 `LLM_IN_*_CLAUDE_BIN` 改回 wrapper 后执行：
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.llm_in_powerpoint.server  # Word/Excel 同理
+```
+
+**验收**：`/api/models?refresh=1` 应返回 CodeBuddy 完整模型目录；用原模型发一条短问答成功才算恢复。CLI 历史里的 `LLM_in_*` 是本机问答会话记录，不是修图流量；修图始终走图片 API。
+
+## 案例 D：修图结果下载失败（2026-10-28 实战）
+
+混元同步 `/v2/images/edits` 已返回图片 URL，但服务下载 CDN 产物时偶发 `fetch failed`。最新版不会重新扣费生成，而是对同一个 URL 依次尝试 Node fetch、curl 代理、curl 直连，并在最终错误中附底层网络错误码。若三种方式都失败，先检查系统代理与 CDN 放行，再把完整错误码交给维护者。

@@ -9,7 +9,8 @@
 //   POST /v2/async/images/tasks   { task_id } 轮询 → completed 后 data[0].url 为透明 PNG
 //
 // 上下文配图：spawn cbc-claude.js（CodeBuddy wrapper，glm-5.3-flash）把选中文本浓缩成英文生图 prompt。
-// Node fetch 不读 HTTP_PROXY，实测本机直连 www.workbuddy.cn 正常。
+// Node 22 可通过 NODE_USE_ENV_PROXY=1 使用环境代理；serviceFetch 会在请求前
+// 动态检查代理活性，避免系统代理端口变化后混元/自定义 API/图片下载全部超时。
 //
 // ---------- 生图引擎架构（2026-10-23） ----------
 // generateImage({prompt,size,count,engine}) 按 engine 分发三口径：
@@ -25,13 +26,17 @@
 //           请求 POST {apiBase}/images/generations {model,prompt,size,n}，兼容
 //           OpenAI 标准 {data:[{b64_json|url}]} 与嵌套 {data:{data:[…]}} 两种返回。
 
-import { readFileSync, statSync } from 'node:fs';
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { readFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnEnv, CLAUDE_BIN } from './config.js';
+
+// 必须在首次 fetch 前开启；Node 22.12+ 支持（与 package.json engines 一致）。
+if (!process.env.NODE_USE_ENV_PROXY) process.env.NODE_USE_ENV_PROXY = '1';
 
 const HOST = 'https://www.workbuddy.cn';
 const GEN_ENDPOINT = HOST + '/v2/images/generations';
@@ -119,7 +124,7 @@ async function hyGenerate(prompt, sz, n) {
   async function genOnce() {
     let resp;
     try {
-      resp = await fetch(GEN_ENDPOINT, {
+      resp = await serviceFetch(GEN_ENDPOINT, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: GEN_MODEL, prompt: prompt.trim(), size: sz, n: 1 }),
@@ -202,7 +207,11 @@ function jimengAuthed(bin, env) {
       try { resolve(JSON.parse(out.trim().split('\n').pop())?.data?.loggedIn === true); }
       catch { resolve(false); }
     });
-  }).then((loggedIn) => { jimengAuthCache = { at: Date.now(), loggedIn }; return loggedIn; });
+  }).then((loggedIn) => {
+    // 只缓存成功态：用户按提示 auth login 后应立即生效，失败态缓存会让下拉灰 60 秒
+    jimengAuthCache = loggedIn ? { at: Date.now(), loggedIn } : { at: 0, loggedIn: false };
+    return loggedIn;
+  });
 }
 
 // 通用 CLI 执行器：超时杀进程；非零退出但 stdout 有内容时不立即报错（交给调用方解析）。
@@ -278,6 +287,17 @@ async function jimengSpawnEnv(jcfg) {
     }
   }
   return env;
+}
+
+// Node fetch 默认不读代理。开启 EnvHttpProxyAgent 后，在每次请求前同步一份
+// 经活性探测的环境变量：当前代理失效时换系统代理，系统代理也不可用则直连。
+async function serviceFetch(url, options) {
+  const env = await jimengSpawnEnv({});
+  for (const k of PROXY_KEYS) {
+    if (env[k]) process.env[k] = env[k];
+    else delete process.env[k];
+  }
+  return fetch(url, options);
 }
 
 // runCli 拒绝时 stderr 里常带 CLI 的 JSON 错误对象，解析出 code/message 给友好提示
@@ -378,7 +398,7 @@ async function customGenerate(id, prompt, sz, n) {
   const model = typeof c.model === 'string' && c.model ? c.model : 'image-gen';
   let resp;
   try {
-    resp = await fetch(base + '/images/generations', {
+    resp = await serviceFetch(base + '/images/generations', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -407,6 +427,210 @@ async function customGenerate(id, prompt, sz, n) {
   return { images, usage: data.usage || {} };
 }
 
+// ---------- 修图（图生图：选中图片 + 文字描述 → AI 修改） ----------
+// hy（默认）：POST /v2/images/edits 同步端点，2026-10-28 实测 hunyuan-image-alpha 支持：
+//   {model, image:[b64], prompt, response_format:"url"} → data.data[].url。
+//   注意区分：抠图走的 /v2/async/images/edits 不支持 hunyuan-stream 后端（code 11103），
+//   修图必须走这个同步端点。
+// jimeng：resource upload（自带 UUID 幂等键，失败可 resource get 恢复）
+//   → node create image --mode i2i --ref res:<id> → submission.resources → download。
+//   统一写入专用画布「LLM_in_Work 修图」（jcfg.projectId 可覆盖；否则读缓存
+//   ~/.codebuddy/jimeng-canvas.json，没有则创建一次），不污染用户现有画布。
+const HY_EDIT_ENDPOINT = HOST + '/v2/images/edits';
+const JIMENG_CANVAS_CACHE = path.join(os.homedir(), '.codebuddy', 'jimeng-canvas.json');
+
+export async function editImage({ imageB64, prompt, count, engine } = {}) {
+  if (typeof imageB64 !== 'string' || !imageB64) throw new Error('请先提供原图（选中图片、粘贴或上传）');
+  if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('请描述想要的修改（例如：把背景换成海边）');
+  if (prompt.length > MAX_PROMPT) throw new Error(`修改描述过长（上限 ${MAX_PROMPT} 字）`);
+  const b64 = imageB64.replace(/^data:image\/[a-z+]+;base64,/, '').replace(/\s/g, '');
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(b64)) throw new Error('原图数据无效，请重新读取或上传图片');
+  if (b64.length > MAX_IMAGE_B64 * 1.4) throw new Error('图片过大（上限 4MB），请压缩后再试');
+  const n = Math.min(Math.max(Number.parseInt(count, 10) || 1, 1), 4);
+  const eng = typeof engine === 'string' && engine ? engine : 'hy';
+  if (eng === 'hy') return hyEdit(b64, prompt.trim(), n);
+  if (eng === 'jimeng') return jimengEdit(b64, prompt.trim(), n);
+  throw new Error('修图目前支持混元和即梦两个引擎');
+}
+
+async function hyEditOnce(b64, prompt) {
+  const key = readKey();
+  let resp;
+  try {
+    resp = await serviceFetch(HY_EDIT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: GEN_MODEL, image: [b64], prompt, response_format: 'url' }),
+      signal: AbortSignal.timeout(GEN_TIMEOUT_MS),
+    });
+  } catch (e) {
+    const cause = e?.cause?.code || e?.cause?.message || '';
+    throw new Error(`修图服务连接失败：${e?.message || e}${cause ? `（${cause}）` : ''}`);
+  }
+  if (!resp.ok) throw new Error(`修图服务 HTTP ${resp.status}`);
+  let data;
+  try { data = await resp.json(); } catch { throw new Error('修图服务返回了无法解析的内容'); }
+  if (data.code !== 0) throw new Error(`修图失败：${data.msg || '未知错误'}（code ${data.code}）`);
+  const items = Array.isArray(data?.data?.data) ? data.data.data : [];
+  const images = [];
+  for (const it of items) {
+    if (it && typeof it.b64_json === 'string' && it.b64_json) { images.push({ b64: it.b64_json, mime: 'image/png' }); continue; }
+    if (it && typeof it.url === 'string' && /^https:\/\//.test(it.url)) images.push(await downloadAsImage(it.url));
+  }
+  if (!images.length) throw new Error('修图服务未返回图片');
+  return { images, usage: data.usage || {} };
+}
+
+async function hyEdit(b64, prompt, n) {
+  if (n === 1) return hyEditOnce(b64, prompt);
+  const settled = await Promise.allSettled(Array.from({ length: n }, () => hyEditOnce(b64, prompt)));
+  const ok = settled.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+  if (!ok.length) {
+    const firstErr = settled[0].reason;
+    throw firstErr instanceof Error ? firstErr : new Error(String(firstErr || '修图失败'));
+  }
+  return { images: ok.flatMap((r) => r.images), usage: {} };
+}
+
+// ---- 即梦修图辅助 ----
+async function ensureJimengProject(bin, env, jcfg) {
+  if (typeof jcfg.projectId === 'string' && jcfg.projectId) return jcfg.projectId;
+  try {
+    const cached = JSON.parse(readFileSync(JIMENG_CANVAS_CACHE, 'utf8'))?.projectId;
+    if (cached) return cached;
+  } catch {}
+  const out = await runCli(bin, ['canvas', 'create', 'LLM_in_Work 修图', '--format', 'json', '--non-interactive'], 30 * 1000, '即梦画布创建', env);
+  let pid = '';
+  for (const line of out.split('\n')) {
+    try { const j = JSON.parse(line); if (j?.data?.project?.projectId) pid = j.data.project.projectId; } catch {}
+  }
+  if (!pid) throw new Error('即梦画布创建失败（可在 image-engines.json 的 jimeng.projectId 手动指定）');
+  try { writeFileSync(JIMENG_CANVAS_CACHE, JSON.stringify({ projectId: pid }), { mode: 0o600 }); } catch {}
+  return pid;
+}
+
+async function jimengResourceState(bin, env, pid, rid) {
+  try {
+    const out = await runCli(bin, ['resource', 'get', rid, '--project-id', pid, '--format', 'json', '--non-interactive'], 30 * 1000, '即梦资源查询', env);
+    for (const line of out.split('\n')) {
+      try { const j = JSON.parse(line); const st = j?.data?.state || j?.data?.status; if (st) return String(st).toLowerCase(); } catch {}
+    }
+  } catch {}
+  return '';
+}
+
+async function jimengUpload(bin, env, pid, filePath) {
+  const rid = randomUUID(); // 幂等键：upload_state_unknown 时用它查状态恢复
+  const args = ['resource', 'upload', '--file', filePath, '--project-id', pid, '--resource-id', rid, '--format', 'json', '--non-interactive'];
+  try {
+    await runCli(bin, args, 120 * 1000, '即梦图片上传', env);
+    return rid;
+  } catch (e) {
+    const blob = String(e?.stderr || '') + String(e?.message || '');
+    if (/upload_state_unknown/.test(blob)) {
+      // 状态未知：可能已上传成功。轮询 resource get 直到 success/failed
+      const deadline = Date.now() + 180 * 1000;
+      let lastState = '';
+      while (Date.now() < deadline) {
+        const st = await jimengResourceState(bin, env, pid, rid);
+        lastState = st || lastState;
+        if (st === 'success') return rid;
+        if (st === 'failed' || st === 'canceled') break;
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+      throw new Error(`即梦图片上传状态未知（resourceId: ${rid}，最近状态：${lastState || '未返回'}）。请稍后重试；若持续出现，请提供该 resourceId 排查。`);
+    }
+    throw enrichCliError(e, '即梦图片上传');
+  }
+}
+
+// 解析即梦 NDJSON 输出（事件行 + 结果行），返回成功的 resources 数组
+function parseJimengResources(out, label) {
+  let okResult = null, errResult = null;
+  for (const line of out.split('\n')) {
+    const s = line.trim();
+    if (!s.startsWith('{')) continue;
+    try {
+      const j = JSON.parse(s);
+      if (j && j.ok === true && j.data) okResult = j;
+      else if (j && j.ok === false) errResult = j;
+    } catch {}
+  }
+  if (!okResult) {
+    const msg = errResult?.error?.message || errResult?.msg || errResult?.error
+      || (errResult ? JSON.stringify(errResult).slice(0, 200) : 'CLI 未返回结果');
+    const hint = errResult?.error?.code === 'cli.transport_failed'
+      ? '（服务进程连不上即梦：请开启系统代理，或在 ~/.codebuddy/image-engines.json 的 jimeng.env 配置 HTTPS_PROXY）' : '';
+    throw new Error(`${label}失败：${msg}${hint}`);
+  }
+  const resources = okResult?.data?.submission?.resources;
+  if (!Array.isArray(resources) || !resources.length) throw new Error(`${label}未返回产物（可能被积分上限拦截）`);
+  const good = resources.filter((r) => r && typeof r.resourceId === 'string' && r.state !== 'failed');
+  if (!good.length) throw new Error(`${label}失败：${resources[0]?.state || '产物状态异常'}`);
+  return good;
+}
+
+async function downloadJimengResources(bin, env, good, projectId) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'LLM_in_Work-jimeng-'));
+  try {
+    const images = [];
+    for (const r of good) {
+      const file = path.join(dir, `${r.resourceId}.img`);
+      const args = ['resource', 'download', r.resourceId, '-o', file];
+      if (projectId) args.push('--project-id', projectId);
+      args.push('--format', 'json', '--non-interactive');
+      await runCli(bin, args, 60 * 1000, '即梦产物下载', env);
+      const buf = await readFile(file);
+      if (!buf.length) throw new Error('即梦产物下载为空');
+      images.push({ b64: buf.toString('base64'), mime: detectMime(buf) });
+    }
+    return images;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function jimengEdit(b64, prompt, n) {
+  const cfg = loadEnginesConfig();
+  const jcfg = cfg.jimeng && typeof cfg.jimeng === 'object' ? cfg.jimeng : {};
+  const bin = (typeof jcfg.bin === 'string' && jcfg.bin) || findJimengBin();
+  if (!bin) throw new Error('未找到 dreamina-canvas CLI（即梦修图需先安装）');
+  const env = await jimengSpawnEnv(jcfg);
+  const model = typeof jcfg.model === 'string' && jcfg.model ? jcfg.model : JIMENG_DEFAULT_MODEL;
+  const perImg = Math.min(Math.max(Number.parseInt(jcfg.creditCeiling, 10) || JIMENG_DEFAULT_CEILING, 1), 100);
+  const pid = await ensureJimengProject(bin, env, jcfg);
+
+  // 原图落临时文件 → 上传（幂等键）
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'LLM_in_Work-edit-'));
+  let rid;
+  try {
+    const srcBuf = Buffer.from(b64, 'base64');
+    const mime = detectMime(srcBuf);
+    const ext = mime === 'image/jpeg' ? '.jpg' : mime === 'image/webp' ? '.webp' : '.png';
+    const srcFile = path.join(dir, 'source' + ext);
+    await writeFile(srcFile, srcBuf);
+    rid = await jimengUpload(bin, env, pid, srcFile);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+
+  const args = [
+    'node', 'create', 'image', '--mode', 'i2i', '--model', model,
+    '--ref', `res:${rid}`, '--prompt', prompt, '--project-id', pid,
+    '--count', String(n), '--run', '--wait', '--yes', '--credit-ceiling', String(perImg * n),
+    '--timeout', '5m', '--format', 'json', '--non-interactive',
+  ];
+  let out;
+  try {
+    out = await runCli(bin, args, JIMENG_RUN_TIMEOUT_MS, '即梦修图', env);
+  } catch (e) {
+    throw enrichCliError(e, '即梦修图');
+  }
+  const good = parseJimengResources(out, '即梦修图');
+  const images = await downloadJimengResources(bin, env, good, pid);
+  return { images, usage: { engine: 'jimeng', model, count: images.length } };
+}
+
 // ---------- 抠图（去背景，透明 PNG） ----------
 export async function matting({ imageB64 } = {}) {
   if (typeof imageB64 !== 'string' || !imageB64) throw new Error('请先提供图片（选中图片、粘贴或上传）');
@@ -417,7 +641,7 @@ export async function matting({ imageB64 } = {}) {
   // ① 提交任务
   let submit;
   try {
-    const r = await fetch(EDIT_ENDPOINT, {
+    const r = await serviceFetch(EDIT_ENDPOINT, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: MATTING_MODEL, response_format: 'url', image: [b64] }),
@@ -440,7 +664,7 @@ export async function matting({ imageB64 } = {}) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     let poll;
     try {
-      const r = await fetch(TASK_ENDPOINT, {
+      const r = await serviceFetch(TASK_ENDPOINT, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ task_id: taskId }),
@@ -525,14 +749,62 @@ function detectMime(buf) {
   return 'image/png';
 }
 
+// curl 二进制下载回退：Node 的 EnvHttpProxyAgent 在部分网络下会偶发 fetch failed；
+// 已生成的图片不能因为一次下载抖动而丢失。curl 在 macOS / Windows 11 均自带。
+function curlDownload(url, env) {
+  return new Promise((resolve, reject) => {
+    const marker = Buffer.from('\n__LLM_IN_WORK_MIME__:');
+    const args = ['-fSL', '-sS', '--connect-timeout', '20', '--max-time', String(Math.ceil(DOWNLOAD_TIMEOUT_MS / 1000)),
+      '--write-out', '\n__LLM_IN_WORK_MIME__:%{content_type}', url];
+    const child = spawn('curl', args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const chunks = [];
+    let size = 0, err = '';
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('下载超时')); }, DOWNLOAD_TIMEOUT_MS + 5000);
+    child.stdout.on('data', (d) => {
+      size += d.length;
+      if (size > 50 * 1024 * 1024) { child.kill('SIGKILL'); reject(new Error('图片超过 50MB')); return; }
+      chunks.push(d);
+    });
+    child.stderr.on('data', (d) => { err += d.toString(); });
+    child.on('error', (e) => { clearTimeout(timer); reject(e); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) { reject(new Error(err.trim().slice(0, 240) || `curl exit ${code}`)); return; }
+      const all = Buffer.concat(chunks);
+      const idx = all.lastIndexOf(marker);
+      if (idx < 0) { reject(new Error('下载返回格式异常')); return; }
+      const buf = all.subarray(0, idx);
+      if (!buf.length) { reject(new Error('空文件')); return; }
+      const headerMime = all.subarray(idx + marker.length).toString('utf8').trim().split(';')[0];
+      resolve({ buf, mime: /^image\//.test(headerMime) ? headerMime : detectMime(buf) });
+    });
+  });
+}
+
 async function downloadAsImage(url) {
+  let firstError = null;
   try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    const r = await serviceFetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const buf = Buffer.from(await r.arrayBuffer());
     if (!buf.length) throw new Error('空文件');
-    return { b64: buf.toString('base64'), mime: (r.headers.get('content-type') || 'image/png').split(';')[0] };
+    return { b64: buf.toString('base64'), mime: (r.headers.get('content-type') || detectMime(buf)).split(';')[0] };
   } catch (e) {
-    throw new Error(`图片下载失败：${e?.message || e}`);
+    firstError = e;
   }
+
+  // 回退顺序：经活性探测的代理环境 → 强制直连。两次都只是下载同一产物，不重复生成。
+  const proxyEnv = await jimengSpawnEnv({});
+  const directEnv = { ...proxyEnv };
+  for (const k of PROXY_KEYS) delete directEnv[k];
+  const errors = [];
+  for (const env of [proxyEnv, directEnv]) {
+    try {
+      const r = await curlDownload(url, env);
+      return { b64: r.buf.toString('base64'), mime: r.mime };
+    } catch (e) { errors.push(e?.message || String(e)); }
+  }
+  const cause = firstError?.cause?.code || firstError?.cause?.message || '';
+  const first = String(firstError?.message || firstError || '未知错误') + (cause ? `（${cause}）` : '');
+  throw new Error(`图片下载失败：${first}；代理/直连回退也未成功（${errors.join('；')}）`);
 }

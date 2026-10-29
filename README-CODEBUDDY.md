@@ -57,7 +57,7 @@ GLM-5.3 / Kimi-K3 / Deepseek-V4 等模型
 
 ## AI 图像工具（2026-10-09 新增，Office 三件套）
 
-面板输入区的「🖼 图像」按钮打开，含两个标签页：**插图** 和 **抠图**。不走 CLI（headless 模式下
+面板输入区的「🖼 图像」按钮打开，含三个标签页：**插图**、**修图** 和 **抠图**。不走 CLI（headless 模式下
 ImageGen 工具被产品配置门控），而是**直连 WorkBuddy 图像 API**（均为实测通过的端点）：
 
 ### 插图（文生图 + 上下文配图）
@@ -92,10 +92,16 @@ POST https://www.workbuddy.cn/v2/async/images/tasks     # 轮询（4s 间隔，�
 - 结果以棋盘格背景预览（直观看到透明区域），点击可放大，插入后是透明 PNG 可直接叠在版式上
 - 计费：约 5.7 credits/次，结果 RGBA 1024×1024，实测约 16 秒完成
 
+### 修图（2026-10-28 新增）
+
+- 默认混元同步 `POST /v2/images/edits`：`{model:"hunyuan-image-alpha", image:[b64], prompt, response_format:"url"}`；即梦 i2i 为备选，不强制安装 CLI
+- PPT 选中图片自动载入，也可粘贴/拖拽/上传；输入文字 brief 后生成 1–3 张候选，可替换原图或插入新图
+- 产物下载使用「Node fetch → curl 代理 → curl 直连」回退，避免网络抖动浪费已生成结果
+
 ### 实现文件
 
 - 服务端：各助手 `server/imagegen.js`（generateImage / matting / enhancePrompt 三函数）+
-  `server.js` 路由 `/api/image`、`/api/image/prompt`、`/api/image/matting`
+  `server.js` 路由 `/api/image`、`/api/image/edit`、`/api/image/prompt`、`/api/image/matting`
 - 前端：各助手 `taskpane/imagepanel.js`（自包含模块，动态注入 UI，不碰 taskpane.js），
   插入用 Office.js `setSelectedDataAsync(CoercionType.Image)`
 

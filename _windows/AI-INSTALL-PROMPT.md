@@ -24,7 +24,7 @@
   powershell -ExecutionPolicy Bypass -File .\install-codebuddy.ps1
 它会提示粘贴 CodeBuddy API key（ck_ 开头）。如果我不知道 key 在哪，告诉我获取路径：
 WorkBuddy → 个人信息 → 管理中心 → 访问密钥（网页端即可，不必装 WorkBuddy 客户端）。
-直接回车可跳过——聊天功能不受影响（走 CLI 自身登录态），仅生图/抠图不可用。
+直接回车可跳过——聊天功能不受影响（走 CLI 自身登录态），仅生图/修图/抠图不可用。
 如果第 0 步 CLI 探测有问题，可改用：
   powershell -ExecutionPolicy Bypass -File .\install-codebuddy.ps1 -CodebuddyBin "<codebuddy 可执行文件完整路径>"
 脚本最后必须显示 [OK] wrapper 已部署，且环境变量写入成功。
@@ -32,7 +32,7 @@ WorkBuddy → 个人信息 → 管理中心 → 访问密钥（网页端即可�
 【第 2 步·CLI 登录确认】
 如果 codebuddy 从未登录过：运行 `codebuddy --version` 能出版本号即可；正式使用前需本人运行一次
 `codebuddy` 交互模式并按提示完成浏览器登录（国内站/企业域名按我自己的账号情况选）。
-登录状态与 API key 无关：聊天 = CLI 登录态，生图/抠图 = API key。
+登录状态与 API key 无关：聊天 = CLI 登录态，生图/修图/抠图 = API key。
 
 【第 3 步·安装三个套件】
 重新打开一个新的 PowerShell 窗口（让用户级环境变量生效），然后依次运行：
@@ -54,7 +54,8 @@ WorkBuddy → 个人信息 → 管理中心 → 访问密钥（网页端即可�
 安装成功后告诉我：
 - Word/PPT/Excel 的「开始」功能区右侧会有 LLM_in 按钮，点击打开面板
 - 面板右上角「设置」里后端选 CodeBuddy，模型选 glm-5.3（可选模型以实际列表为准）
-- 图像功能：顶部「图像」tab → 插图（文生图/为选中内容配图）或抠图（PPT 里选中图片后进入自动载入）
+- 图像功能：顶部「图像」tab → 插图（文生图/为选中内容配图）、修图（选中图片后输入修改 brief，默认混元）或抠图
+- 修图验收：PPT 选中图片 →「图像」→「修图」→ 输入「把背景换成海边，主体保持不变」→ 预览后替换原图或插入新图
 - 完整说明在 _windows\README-WINDOWS.md，排障手册在仓库根 TROUBLESHOOTING.md
 
 【注意事项】
