@@ -144,7 +144,9 @@
     });
   }
 
-  // ---- PPT：用抠图结果替换选中的图片形状（保位置保尺寸，1.5+） ----
+  // ---- PPT：用抠图结果替换选中的图片形状（保位置保尺寸保层级，1.5+；层级需 1.8） ----
+  // 返回新形状 id：替换实现为 addImage + delete，新形状会拿到新 id，
+  // 调用方必须回写，否则第二次「替换原图」会因 id 不匹配被误拒。
   function replaceSelectedImageShape(b64, expectedShapeId) {
     return new Promise((resolve, reject) => {
       if (!pptSlideApi) { reject(new Error(T.replaceUnavail)); return; }
@@ -159,6 +161,13 @@
           target.load('left, top, width, height, rotation, name');
           const slide = target.getParentSlide();
           await ctx.sync();
+          // 原图遮挡层级（zOrderPosition 需 PowerPointApi 1.8；不支持时跳过，不影响其它属性）
+          let origZ = null;
+          try {
+            target.load('zOrderPosition');
+            await ctx.sync();
+            if (typeof target.zOrderPosition === 'number') origZ = target.zOrderPosition;
+          } catch { origZ = null; }
           const pic = slide.shapes.addImage(b64);
           pic.left = target.left; pic.top = target.top;
           pic.width = target.width; pic.height = target.height;
@@ -166,7 +175,23 @@
           if (target.name) pic.name = target.name;
           target.delete();
           await ctx.sync();
-          resolve();
+          // 恢复遮挡层级：addImage 默认置顶，逐层后移回原图所在位置
+          if (origZ !== null) {
+            try {
+              for (let i = 0; i < 256; i++) {
+                pic.load('zOrderPosition');
+                await ctx.sync();
+                const z = pic.zOrderPosition;
+                if (typeof z !== 'number' || z <= origZ) break;
+                pic.setZOrder('SendBackward');
+                await ctx.sync();
+              }
+            } catch { /* 宿主不支持 setZOrder 时保持现状，不阻断替换 */ }
+          }
+          // 取回新形状 id 供下一次替换校验
+          let newId = null;
+          try { pic.load('id'); await ctx.sync(); newId = pic.id; } catch { newId = null; }
+          resolve(newId);
         } catch (e) { reject(e); }
       }).catch(reject);
     });
@@ -891,7 +916,8 @@
       matReplace.disabled = true;
       setStatus(matStatus, T.inserting);
       try {
-        await replaceSelectedImageShape(matResult.b64.replace(/^data:[^,]+,/, ''), matSource?.shapeId);
+        const newId = await replaceSelectedImageShape(matResult.b64.replace(/^data:[^,]+,/, ''), matSource?.shapeId);
+        if (matSource && newId) matSource.shapeId = newId; // 回写新 id，允许对同一图连续替换
         setStatus(matStatus, T.replaced);
       } catch (e) {
         setStatus(matStatus, T.insertFailed + '：' + (e && e.message ? e.message : e), true);
@@ -907,7 +933,8 @@
       editReplace.disabled = true;
       setStatus(editStatus, T.inserting);
       try {
-        await replaceSelectedImageShape(img.b64.replace(/^data:[^,]+,/, ''), matSource?.shapeId);
+        const newEditId = await replaceSelectedImageShape(img.b64.replace(/^data:[^,]+,/, ''), matSource?.shapeId);
+        if (matSource && newEditId) matSource.shapeId = newEditId; // 回写新 id，允许对同一图连续替换
         setStatus(editStatus, T.replaced);
       } catch (e) {
         setStatus(editStatus, T.insertFailed + '：' + (e && e.message ? e.message : e), true);
