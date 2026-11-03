@@ -77,6 +77,8 @@
     zoomTitle: '图片预览（点击任意处关闭）',
     httpErr: '服务错误（HTTP ',
     unsupported: '不支持的图片格式', readFail: '文件读取失败',
+    unsupportedBitmap: '该内容不是位图图片（可能是 SVG、网页元素或文本），无法抠图/修图。请改用 PNG/JPG 或截图后再试',
+    svgFail: 'SVG 转 PNG 失败，请改用 PNG/JPG 图片',
     noSlide: '未找到当前幻灯片，请先在幻灯片中点击任意位置再插入',
   };
 
@@ -386,15 +388,42 @@
   function blobToB64(blob) {
     return new Promise((resolve, reject) => {
       if (blob.size > 4 * 1024 * 1024) { reject(new Error(T.imgTooBig)); return; }
+      const type = String(blob.type || '').toLowerCase();
+      // SVG 是文本格式，抠图/修图上游只收位图：先在本地栅格化为 PNG
+      if (type === 'image/svg+xml' || type === 'image/svg') { rasterizeToPng(blob).then(resolve, reject); return; }
       const fr = new FileReader();
       fr.onload = () => {
         const r = String(fr.result || '');
         const m = r.match(/^data:(image\/[a-z+]+);base64,(.*)$/);
-        if (!m) { reject(new Error(T.unsupported)); return; }
+        // 只放行位图（png/jpg/webp/gif/bmp）；svg/文本等会被上游以 decoded data is not an image 拒绝
+        if (!m || !/^(?:png|jpeg|webp|gif|bmp)$/.test(m[1].slice(6).replace('+xml', ''))) { reject(new Error(T.unsupportedBitmap)); return; }
         resolve({ b64: m[2], mime: m[1] });
       };
       fr.onerror = () => reject(new Error(T.readFail));
       fr.readAsDataURL(blob);
+    });
+  }
+
+  // 把 SVG 等矢量/文本型图片在本地转成 PNG 位图（最长边压到 2048），避免上游报 decoded data is not an image
+  function rasterizeToPng(blob) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob);
+      const finish = (fn, arg) => { try { URL.revokeObjectURL(url); } catch {} fn(arg); };
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const w0 = img.naturalWidth || 300, h0 = img.naturalHeight || 300;
+          const k = Math.min(1, 2048 / Math.max(w0, h0));
+          const cv = document.createElement('canvas');
+          cv.width = Math.max(1, Math.round(w0 * k)); cv.height = Math.max(1, Math.round(h0 * k));
+          cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+          const m = String(cv.toDataURL('image/png')).match(/^data:image\/png;base64,(.+)$/);
+          if (!m || !m[1]) throw new Error('rasterize failed');
+          finish(resolve, { b64: m[1], mime: 'image/png' });
+        } catch { finish(reject, new Error(T.svgFail)); }
+      };
+      img.onerror = () => finish(reject, new Error(T.svgFail));
+      img.src = url;
     });
   }
 

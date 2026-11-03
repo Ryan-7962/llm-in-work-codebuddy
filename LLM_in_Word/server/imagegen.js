@@ -446,6 +446,7 @@ export async function editImage({ imageB64, prompt, count, engine } = {}) {
   const b64 = imageB64.replace(/^data:image\/[a-z+]+;base64,/, '').replace(/\s/g, '');
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(b64)) throw new Error('原图数据无效，请重新读取或上传图片');
   if (b64.length > MAX_IMAGE_B64 * 1.4) throw new Error('图片过大（上限 4MB），请压缩后再试');
+  assertBitmapB64(b64, '修图');
   const n = Math.min(Math.max(Number.parseInt(count, 10) || 1, 1), 4);
   const eng = typeof engine === 'string' && engine ? engine : 'hy';
   if (eng === 'hy') return hyEdit(b64, prompt.trim(), n);
@@ -632,10 +633,30 @@ async function jimengEdit(b64, prompt, n) {
 }
 
 // ---------- 抠图（去背景，透明 PNG） ----------
+// ---- 位图魔数校验：SVG/网页元素/文本等"伪图片"上游会报 decoded data is not an image，提前拦截并给出可操作提示 ----
+function sniffBitmap(buf) {
+  if (!buf || buf.length < 12) return false;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true; // PNG
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true; // JPEG
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return true; // GIF
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return true; // BMP
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return true; // WEBP
+  return false;
+}
+
+function assertBitmapB64(b64, scene) {
+  let buf = null;
+  try { buf = Buffer.from(b64, 'base64'); } catch { buf = null; }
+  if (!sniffBitmap(buf)) {
+    throw new Error(`${scene}仅支持位图图片（PNG/JPG/WEBP/GIF/BMP）。当前内容像是 SVG、网页元素或文本，请改用 PNG/JPG 或截图后再试`);
+  }
+}
+
 export async function matting({ imageB64 } = {}) {
   if (typeof imageB64 !== 'string' || !imageB64) throw new Error('请先提供图片（选中图片、粘贴或上传）');
   const b64 = imageB64.replace(/^data:image\/[a-z+]+;base64,/, '').replace(/\s/g, '');
   if (b64.length > MAX_IMAGE_B64 * 1.4) throw new Error('图片过大（上限 4MB），请压缩后再试');
+  assertBitmapB64(b64, '抠图');
   const key = readKey();
 
   // ① 提交任务
