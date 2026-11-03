@@ -69,7 +69,7 @@ const MIME = {
 function serveStatic(req, res, urlPath) {
   console.error(`[req] ${new Date().toISOString()} ${req.method} ${req.url}`);
   // 只允许 taskpane/ 和 assets/ 两个目录，防路径穿越
-  const clean = path.normalize(urlPath).replace(/^([/\\]|\.\.)+/, '');
+  const clean = path.normalize(urlPath).replace(/\\/g, '/').replace(/^([/\\]|\.\.)+/, '');
   let file = null;
   if (/^assets\//.test(clean)) file = path.join(ROOT, clean);
   else file = path.join(ROOT, 'taskpane', clean);

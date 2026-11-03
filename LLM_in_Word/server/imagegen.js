@@ -647,10 +647,22 @@ export async function matting({ imageB64 } = {}) {
       body: JSON.stringify({ model: MATTING_MODEL, response_format: 'url', image: [b64] }),
       signal: AbortSignal.timeout(60 * 1000),
     });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) {
+      let detail = '';
+      try {
+        const txt = await r.text();
+        try {
+          const j = JSON.parse(txt);
+          detail = j.msg || j.error?.message || j.message || txt.slice(0, 200);
+        } catch {
+          detail = txt.slice(0, 200);
+        }
+      } catch {}
+      throw new Error(`HTTP ${r.status}${detail ? '：' + detail : ''}`);
+    }
     submit = await r.json();
   } catch (e) {
-    throw new Error(`抠图服务连接失败：${e?.message || e}`);
+    throw new Error(`抠图服务返回错误：${e?.message || e}`);
   }
   if (submit.code !== 0 || !submit?.data?.id) {
     throw new Error(`抠图任务提交失败：${submit.msg || '未知错误'}`);
@@ -670,7 +682,19 @@ export async function matting({ imageB64 } = {}) {
         body: JSON.stringify({ task_id: taskId }),
         signal: AbortSignal.timeout(30 * 1000),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {
+        let detail = '';
+        try {
+          const txt = await r.text();
+          try {
+            const j = JSON.parse(txt);
+            detail = j.msg || j.error?.message || j.message || txt.slice(0, 200);
+          } catch {
+            detail = txt.slice(0, 200);
+          }
+        } catch {}
+        throw new Error(`HTTP ${r.status}${detail ? '：' + detail : ''}`);
+      }
       poll = await r.json();
     } catch (e) {
       if (Date.now() >= deadline) throw new Error(`抠图任务查询失败：${e?.message || e}`);
