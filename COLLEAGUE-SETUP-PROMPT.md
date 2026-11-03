@@ -9,9 +9,10 @@
 
 【第 0 步·确认前置（按平台）】
 - macOS：确认已安装并登录 WorkBuddy（聊天功能走它内嵌的 CLI；生图/修图/抠图只需要 API key）。
-- Windows：不需要 WorkBuddy（Windows 版不带 CLI）。聊天功能需要**独立版 CodeBuddy CLI**——
-  检查 `codebuddy --version`，没有就装（irm https://copilot.tencent.com/cli/install.ps1 | iex），
-  装完运行一次 codebuddy 完成浏览器登录。
+- Windows：确认已装 WorkBuddy 桌面版即可——它自带 node 运行时和 codebuddy CLI
+  （`%LOCALAPPDATA%\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy`，2026-11 实测 v2.165.0），
+  不用另装 Node，也不用另装独立版 CLI，更不用做 CLI 设备登录。只需要一个自己的 CodeBuddy API key（ck_ 开头）。
+  只有在没装 WorkBuddy 的机器上，才退回安装独立版 CLI（irm https://copilot.tencent.com/cli/install.ps1 | iex）。
 
 【第 1 步·克隆仓库】
 仓库是公开的，直接：

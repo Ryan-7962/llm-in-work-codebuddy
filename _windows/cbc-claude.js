@@ -6,7 +6,7 @@
 //        （装到 %LOCALAPPDATA%\codebuddy\bin\codebuddy.exe）
 //      - npm: npm install -g @tencent-ai/codebuddy-code
 //      认证：CLI 自身登录态（首次运行 codebuddy 按提示浏览器登录），无需 API key
-//   B. WorkBuddy 内嵌 CLI（仅 macOS 实测可用；Windows 版 WorkBuddy 不带 codebuddy.exe）
+//   B. WorkBuddy 内嵌 CLI（macOS / Windows 均实测可用；Windows 自带 app.asar.unpacked\cli\bin\codebuddy）
 //      认证：注入 ~/.codebuddy/api.key 作为 CODEBUDDY_API_KEY（WorkBuddy 管理中心的 ck_ key）
 // 做的事：
 //   1. 剥离 codebuddy 不支持的 --disable-slash-commands
@@ -47,7 +47,7 @@ function findCli() {
       push(path.join(process.env.APPDATA, 'npm', 'node_modules', '@tencent-ai', 'codebuddy-code', 'bin', 'codebuddy'), true);
       push(path.join(process.env.APPDATA, 'npm', 'codebuddy.cmd'), false);
     }
-    // 4) WorkBuddy 内嵌（部分版本可能有；实测 2026-10 的 Windows 版没有）
+    // 4) WorkBuddy / CodeBuddy 客户端内嵌（装了客户端就有；2026-11 实测 Windows 版自带 v2.165.0）
     const localPrograms = path.join(os.homedir(), 'AppData', 'Local', 'Programs');
     for (const root of [localPrograms, process.env.ProgramFiles || 'C:\\Program Files', process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)']) {
       for (const app of ['WorkBuddy', 'CodeBuddy']) {

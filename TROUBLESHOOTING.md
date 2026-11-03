@@ -72,8 +72,8 @@ ls /Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/dist/
 
 | 来源 | 平台 | 认证方式 | 说明 |
 |---|---|---|---|
-| WorkBuddy 内嵌 CLI | macOS 实测可用；**Windows 版 WorkBuddy 不带 codebuddy.exe**（2026-10 实测） | 注入 `~/.codebuddy/api.key`（ck_ key，必需） | 路径含 `app.asar.unpacked` |
-| 独立版 CodeBuddy CLI | macOS / Windows / Linux 官方支持 | CLI 自身登录态（首次运行 `codebuddy` 浏览器登录） | Windows 用户走这条：`irm https://copilot.tencent.com/cli/install.ps1 \| iex` 或 `npm i -g @tencent-ai/codebuddy-code` |
+| WorkBuddy 内嵌 CLI | macOS / **Windows 均实测可用**（Windows v2.165.0，2026-11 复核；2026-10 的"Windows 不带"结论已作废） | 注入 `~/.codebuddy/api.key`（ck_ key，必需） | 路径 `resources\app.asar.unpacked\cli\bin\codebuddy`（无扩展名 node 脚本） |
+| 独立版 CodeBuddy CLI | macOS / Windows / Linux 官方支持 | CLI 自身登录态（首次运行 `codebuddy` 浏览器登录） | 仅没装 WorkBuddy 时走这条：`irm https://copilot.tencent.com/cli/install.ps1 \| iex` 或 `npm i -g @tencent-ai/codebuddy-code` |
 
 wrapper（cbc-claude.js）按上表自动探测来源并选择认证方式；`CODEBUDDY_BIN` 环境变量可显式指定。
 

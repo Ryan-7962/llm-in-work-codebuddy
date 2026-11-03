@@ -11,22 +11,28 @@
 请帮我安装本目录里的 LLM_in_Work × CodeBuddy Office 加载项（Word / PowerPoint / Excel 三件套）。请严格按以下步骤执行，每步完成后向我汇报结果再进行下一步：
 
 【第 0 步·环境检查】
-1. 检查 Node.js：运行 `node -v`。要求 22.12+ 或 24+。没有就先从 https://nodejs.org 安装 LTS 版再继续。
-2. 检查独立版 CodeBuddy CLI：运行 `codebuddy --version`。
-   - 已安装 → 跳到第 2 步（若从未登录过，提醒我稍后运行一次 codebuddy 完成浏览器登录）。
-   - 未安装 → 询问我是否现在安装（这是腾讯官方 CLI，二选一）：
-     a. 官方安装器（推荐，无需 Node）：irm https://copilot.tencent.com/cli/install.ps1 | iex
+1. 检查 Node.js：运行 `node -v`。要求 22.12+ 或 24+。
+   注意：**装了 WorkBuddy 就自动满足**——WorkBuddy 自带 `~/.workbuddy/binaries/node`（已在 PATH）。
+   只有在 node 不存在时，才需要从 https://nodejs.org 装 LTS 版。
+2. 检查 codebuddy CLI：运行 `codebuddy --version`。
+   - 已安装 → 跳到第 1 步。
+   - 未安装 / 命令不存在 → **先查 WorkBuddy 自带的 CLI**（2026-11 实测存在，v2.165.0）：
+     `%LOCALAPPDATA%\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy`
+     存在就不用装任何东西，直接用（适配层会自动探测；也可以显式传路径，见第 1 步）。
+   - 只有本机确实没装 WorkBuddy 时，才询问我是否安装独立版（二选一）：
+     a. 官方安装器：irm https://copilot.tencent.com/cli/install.ps1 | iex
      b. npm 方式：npm install -g @tencent-ai/codebuddy-code
-   - 注意：**不要去找 WorkBuddy 安装目录里的 CLI，Windows 版 WorkBuddy 不带 codebuddy.exe**（已实测确认）。
+     装完需要运行一次 codebuddy 完成浏览器登录。
 
 【第 1 步·环境准备】
 进入仓库（解压目录）的 _windows 子目录，运行：
   powershell -ExecutionPolicy Bypass -File .\install-codebuddy.ps1
 它会提示粘贴 CodeBuddy API key（ck_ 开头）。如果我不知道 key 在哪，告诉我获取路径：
 WorkBuddy → 个人信息 → 管理中心 → 访问密钥（网页端即可，不必装 WorkBuddy 客户端）。
-直接回车可跳过——聊天功能不受影响（走 CLI 自身登录态），仅生图/修图/抠图不可用。
-如果第 0 步 CLI 探测有问题，可改用：
-  powershell -ExecutionPolicy Bypass -File .\install-codebuddy.ps1 -CodebuddyBin "<codebuddy 可执行文件完整路径>"
+**这个 key 必须填**：用 WorkBuddy 自带 CLI 时，适配层靠它认证（`CODEBUDDY_API_KEY`），
+不填则聊天、生图、修图、抠图全部不可用。
+如果第 0/1 步 CLI 探测有问题，可显式指定路径：
+  powershell -ExecutionPolicy Bypass -File .\install-codebuddy.ps1 -CodebuddyBin "%LOCALAPPDATA%\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy"
 脚本最后必须显示 [OK] wrapper 已部署，且环境变量写入成功。
 
 【第 2 步·CLI 登录确认】

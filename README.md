@@ -89,9 +89,13 @@ cd ../LLM_in_Excel   && LLM_IN_EXCEL_CLAUDE_BIN=~/.local/bin/cbc-claude.js ./ins
 
 ## Windows 安装
 
-前置：Node.js 22.12+ 或 24+、Office 2016/365 桌面版、**独立版 CodeBuddy CLI**（官方产品：
-`irm https://copilot.tencent.com/cli/install.ps1 | iex`，装完运行一次 `codebuddy` 完成登录；
-Windows 版 WorkBuddy 不自带 CLI，无需安装 WorkBuddy）。生图/修图/抠图另需 API key（获取路径见上文）。
+前置：**Office 2016/365 桌面版 + 本机已装 WorkBuddy**（装了 WorkBuddy 就自带 Node 运行时和 codebuddy CLI，
+不用另装 Node，也不用另装 CLI）。只需要再填一个自己的 API key（ck_ 开头，获取路径见上文）。
+
+> **2026-11 实测修正**：Windows 版 WorkBuddy **自带** codebuddy CLI，位于
+> `%LOCALAPPDATA%\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy`（实测 v2.165.0，node 脚本）。
+> 适配层会自动探测到这里，配合 `~/.codebuddy/api.key` 直接问答，**无需独立版 CLI，也无需做 CLI 设备登录**。
+> 独立版 CLI（`irm https://copilot.tencent.com/cli/install.ps1 | iex`）只在没装 WorkBuddy 的机器上才需要。
 
 **方式一（推荐）：让 AI 代跑** —— 打开 [`_windows/AI-INSTALL-PROMPT.md`](_windows/AI-INSTALL-PROMPT.md)，
 把提示词整段发给 Windows 电脑上的 AI 助手，按引导完成。
